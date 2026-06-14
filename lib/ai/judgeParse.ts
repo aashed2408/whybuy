@@ -1,5 +1,5 @@
 import { clampConfidence, fallbackVerdict, normalizeDecision } from './verdictHelpers.ts'
-import type { Verdict } from './types.ts'
+import type { ChatMessage, Verdict } from './types.ts'
 
 /**
  * Parser for the judge output.
@@ -447,4 +447,139 @@ function lenientDecisionFromBody(body: string): 'proceed' | 'abandon' | null {
   if (/\bin favor of restraint\b/.test(t)) return 'abandon'
   if (/\bin favor of (the )?(purchase|cart)\b/.test(t)) return 'proceed'
   return normalizeDecision(body)
+}
+
+// =====================================================================
+// TRANSCRIPT-PATTERN OVERRIDE
+// =====================================================================
+//
+// The user reported: "I said I needed it, and the verdict was
+// restraint at 65% confidence." Despite the "DEFAULT POSITION:
+// TRUST THE USER" block, the DEFAULT POSITION: TRUST THE USER +
+// DECISION TABLE, the reframe of the top role from "check on
+// impulse" to "reflection session", and the explicit "WHEN IN
+// DOUBT, LEAN PROCEED" footer — the model still defaults to
+// restraint when the user has shown a concrete need.
+//
+// This is a prompt-level fix on the model's residual
+// restraint-bias. It is not a parser problem. To GUARANTEE
+// that any concrete need the user articulates results in a
+// PURCHASE verdict, we add a deterministic post-processor
+// in code. The model is the input; the user's intent is
+// the output.
+//
+// The override:
+//   1. Scans the transcript for concrete-need patterns in the
+//      user's messages (role === 'defense').
+//   2. If a pattern matches AND the verdict is 'abandon',
+//      forces the verdict to 'proceed' at 0.85+ confidence.
+//   3. The override factors are explicit: "User: stated a
+//      concrete, specific use case", "Override: real need
+//      detected", "Record: 0.85+ in favor of purchase".
+//
+// Conservative: the override does NOT fire on bare "I want it",
+// "I need new tech", "it's on sale", or other vague signals.
+// Those are the ~50/50 case and the model's verdict stands.
+
+/**
+ * Pattern set for detecting a concrete, specific use case the
+ * user has articulated anywhere in the trial. All case-insensitive.
+ * Each pattern is matched against ANY user message (defense turn).
+ *
+ * Conservative — only clear, unambiguous needs. Vague wants
+ * ("I want it", "I need new tech", "it's on sale") do NOT match.
+ */
+const CONCRETE_NEED_PATTERNS: RegExp[] = [
+  // Possessive + broken/fell apart/stopped working/dead (the most
+  // common phrasing). Allows up to 4 words between "my" and the
+  // broken-state verb (e.g. "my current pair of headphones broke").
+  /\bmy\s+\w+(\s+\w+){0,4}\s+(broke|broken|fell apart|stopped working|is dead|died|is ruined|cracked|shattered|won't (charge|turn on|work|hold a charge))\b/i,
+  // Subject-verb-broken: "I broke my X", "I lost my X"
+  /\bI\s+(broke|lost|destroyed|damaged)\s+my\b/i,
+  // Time-bound event: "I have a meeting tomorrow", "I have a
+  // deadline Friday", "I have a trip next week"
+  /\bI\s+have\s+(a|an|my)\s+(meeting|presentation|trip|interview|exam|deadline|event|project|wedding|vacation|flight|conference|class|appointment)\b/i,
+  // Work-related
+  /\bI\s+work\s+(from|at|as)\b/i,
+  // Physical activity with frequency: "I run 30 miles a week",
+  // "I run 5k daily"
+  /\bI\s+run\s+\d+\s*(miles?|km|kilometers?)\b/i,
+  /\bI\s+run\s+\d+\s*(times?\s+)?a\s+(week|day|month)\b/i,
+  // Recreation with frequency
+  /\bI\s+(do|play)\s+\w+\s+\d+\s*(times?|hours|a\s+week|a\s+day|weekly|daily)\b/i,
+  // Savings / planning: "I've been saving for 6 months"
+  /\bI'?ve\s+been\s+saving\s+for\s+\d+\s+(months?|years?|weeks?)\b/i,
+  // Replacement language: "this is a replacement for my X",
+  // "I'm replacing my X"
+  /\b(replacement|replacing)\s+(for|my)\b/i,
+  // Specific need: "I need this for work", "I need this for a
+  // project", "I need this for a trip"
+  /\bI\s+need\s+this\s+for\s+(work|school|college|a\s+project|a\s+trip|a\s+meeting|a\s+presentation|a\s+class|my\s+job|an?\s+event|a\s+deadline|an?\s+interview|an?\s+exam|an?\s+appointment)\b/i,
+  // For a dependent: "for my kid", "for my wife", "for my dog"
+  /\bfor\s+(my\s+(kid|child|son|daughter|wife|husband|mom|dad|mother|father|dog|cat|pet|baby|grandma|grandpa|mum))\b/i,
+  // Recurring use: "I use it every day", "I wear it daily"
+  /\bI\s+(use|wear)\s+(it|this|these|them)\s+(every|each|per|daily|weekly)\b/i,
+  // Budgeted / planned: "I budgeted for this", "I planned for this"
+  /\b(budgeted|planned)\s+(for|to)\b/i,
+]
+
+/**
+ * Returns true if any user message in the transcript contains a
+ * concrete-need pattern. Conservative — only clear, unambiguous
+ * needs. The ~50/50 case ("I want it" alone) and the vague case
+ * ("I need new tech") do NOT match.
+ */
+export function hasConcreteNeed(transcript: ChatMessage[]): boolean {
+  if (!transcript || transcript.length === 0) return false
+  const userMessages = transcript.filter((m) => m.role === 'defense')
+  if (userMessages.length === 0) return false
+  for (const msg of userMessages) {
+    if (!msg.text) continue
+    for (const pattern of CONCRETE_NEED_PATTERNS) {
+      if (pattern.test(msg.text)) return true
+    }
+  }
+  return false
+}
+
+/**
+ * Post-processor override: when the model returns a restraint
+ * verdict but the user has stated a concrete need in the
+ * transcript, force the verdict to PURCHASE at 0.85+.
+ *
+ * This is the user's explicit guarantee: "It should let you
+ * purchase if it identifies any sense of actual need." The model
+ * still has a residual restraint bias even with the
+ * reframe-to-reflection-session fix; this override is the
+ * code-level guarantee that the user's articulated need is
+ * respected regardless of what the model does.
+ *
+ * The override factors are explicit so the user can SEE in the
+ * UI that the override kicked in: "User: stated a concrete,
+ * specific use case", "Override: real need detected", "Record:
+ * 0.85+ in favor of purchase".
+ */
+export function applyTranscriptOverride(
+  verdict: Verdict,
+  transcript: ChatMessage[],
+): Verdict {
+  // Only override if the model said restraint (or fallback). If
+  // the model already said purchase, trust it.
+  if (verdict.decision !== 'abandon') return verdict
+  if (!hasConcreteNeed(transcript)) return verdict
+
+  // Override: real need detected, force PURCHASE at 0.85+.
+  // The summary is preserved from the model's output (so the
+  // user still sees the model's reasoning). The factors are
+  // replaced to make the override VISIBLE in the UI.
+  return {
+    decision: 'proceed',
+    confidence: 0.85,
+    summary: verdict.summary,
+    topFactors: [
+      'User: stated a concrete, specific use case in the transcript',
+      'Override: real need detected, defaulting to purchase',
+      'Record: 0.85+ confidence in favor of purchase',
+    ] as [string, string, string],
+  }
 }

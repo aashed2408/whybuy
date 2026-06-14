@@ -1187,7 +1187,7 @@ test('brandInitial: leading whitespace is trimmed', () => {
 //   - partial-streaming: parse as the model types
 //   - fallback paths (no decision, partial result)
 
-import { parseNaturalVerdict, verdictFromNatural, extractFactors } from '../lib/ai/judgeParse.ts'
+import { parseNaturalVerdict, verdictFromNatural, extractFactors, hasConcreteNeed, applyTranscriptOverride } from '../lib/ai/judgeParse.ts'
 import { clampConfidence, fallbackVerdict, normalizeDecision } from '../lib/ai/verdictHelpers.ts'
 
 const NATURAL_OK = `The Nike Air Max shoes at CAD 122.94 are a want, not a need. The prosecution argued the cost is disproportionate to a "sometimes daily" use case, and the defense did not name a single cheaper alternative. The prosecution's case is the stronger one.
@@ -3018,6 +3018,229 @@ DECISIVE FACTORS:
     v.confidence >= 0.55 && v.confidence <= 0.75,
     `expected 0.55-0.75 (lean either way), got ${v.confidence}`,
   )
+})
+
+// === NEW: applyTranscriptOverride — the GUARANTEE post-processor ===
+//
+// The user explicitly demanded: "It should let you purchase if it
+// identifies any sense of actual need." The model still has a
+// residual restraint bias even with all the prompt fixes. This
+// post-processor in judgeParse.ts is the CODE-LEVEL guarantee:
+// it scans the transcript for concrete-need patterns and forces
+// the verdict to PURCHASE at 0.85+ if the user has shown a real
+// need, regardless of what the model said.
+
+const sampleUserMsg = (text, ts = 1) => ({ role: 'defense', text, ts })
+const sampleProsecutionMsg = (text, ts = 1) => ({ role: 'prosecution', text, ts })
+const sampleJudgeMsg = (text, ts = 1) => ({ role: 'judge', text, ts })
+const restraintVerdict = (overrides = {}) => ({
+  decision: 'abandon',
+  confidence: 0.65,
+  summary: 'The prosecution made a strong case about cost.',
+  topFactors: ['Prosecution: cited cost', 'Prosecution: named an alternative', 'Defense: did not address'],
+  ...overrides,
+})
+const purchaseVerdict = (overrides = {}) => ({
+  decision: 'proceed',
+  confidence: 0.88,
+  summary: 'The user demonstrated a concrete need.',
+  topFactors: ['Defense: broke their old one', 'Prosecution: no specific counter', 'Record: real need'],
+  ...overrides,
+})
+
+test('applyTranscriptOverride: returns the verdict unchanged when there is no concrete need (bare "I want it")', () => {
+  const transcript = [sampleUserMsg('I want it'), sampleUserMsg('I want it')]
+  const v = restraintVerdict()
+  const out = applyTranscriptOverride(v, transcript)
+  // No need detected, verdict should be untouched.
+  assert.equal(out, v, 'no override, returns the same verdict object')
+  assert.equal(out.decision, 'abandon')
+  assert.equal(out.confidence, 0.65)
+})
+
+test('applyTranscriptOverride: returns the verdict unchanged when the model already ruled PURCHASE', () => {
+  const transcript = [sampleUserMsg('my current one broke'), sampleUserMsg('I want it')]
+  const v = purchaseVerdict()
+  const out = applyTranscriptOverride(v, transcript)
+  // Need is present but model already said PURCHASE — no override.
+  assert.equal(out, v)
+  assert.equal(out.decision, 'proceed')
+  assert.equal(out.confidence, 0.88)
+})
+
+test('applyTranscriptOverride: flips restraint to PURCHASE 0.85+ when user says "my current one broke" (THE HEADLINE CASE)', () => {
+  const transcript = [sampleUserMsg('my current one broke and I need a replacement')]
+  const v = restraintVerdict()
+  const out = applyTranscriptOverride(v, transcript)
+  assert.equal(out.decision, 'proceed')
+  assert.equal(out.confidence, 0.85)
+  // The override factors make it VISIBLE in the UI.
+  assert.match(out.topFactors[0], /User: stated a concrete, specific use case/i)
+  assert.match(out.topFactors[1], /Override: real need detected/i)
+  assert.match(out.topFactors[2], /0\.85\+.*in favor of purchase/i)
+  // The model's summary is preserved so the user still sees reasoning.
+  assert.equal(out.summary, v.summary)
+})
+
+test('applyTranscriptOverride: fires on "I work from home" (work-related need)', () => {
+  const transcript = [sampleUserMsg('I work from home and I need these for video calls')]
+  const out = applyTranscriptOverride(restraintVerdict(), transcript)
+  assert.equal(out.decision, 'proceed')
+  assert.equal(out.confidence, 0.85)
+})
+
+test('applyTranscriptOverride: fires on "I have been saving for 6 months" (savings/planning)', () => {
+  const transcript = [sampleUserMsg("I've been saving for 6 months for this")]
+  const out = applyTranscriptOverride(restraintVerdict(), transcript)
+  assert.equal(out.decision, 'proceed')
+})
+
+test('applyTranscriptOverride: fires on "I run 30 miles a week" (activity with frequency)', () => {
+  const transcript = [sampleUserMsg('I run 30 miles a week and need new shoes')]
+  const out = applyTranscriptOverride(restraintVerdict(), transcript)
+  assert.equal(out.decision, 'proceed')
+})
+
+test('applyTranscriptOverride: fires on "for my kid" / "for my wife" (for a dependent)', () => {
+  const t1 = [sampleUserMsg('this is a gift for my kid')]
+  assert.equal(applyTranscriptOverride(restraintVerdict(), t1).decision, 'proceed')
+  const t2 = [sampleUserMsg('replacement for my wife\'s broken headphones')]
+  assert.equal(applyTranscriptOverride(restraintVerdict(), t2).decision, 'proceed')
+  const t3 = [sampleUserMsg('I need this for my dog actually')]
+  assert.equal(applyTranscriptOverride(restraintVerdict(), t3).decision, 'proceed')
+})
+
+test('applyTranscriptOverride: fires on "I need this for work" / "for a project" (specific need)', () => {
+  assert.equal(
+    applyTranscriptOverride(restraintVerdict(), [sampleUserMsg('I need this for work')]).decision,
+    'proceed',
+  )
+  assert.equal(
+    applyTranscriptOverride(restraintVerdict(), [sampleUserMsg('I need this for a project')]).decision,
+    'proceed',
+  )
+  assert.equal(
+    applyTranscriptOverride(restraintVerdict(), [sampleUserMsg('I need this for a trip next week')]).decision,
+    'proceed',
+  )
+})
+
+test('applyTranscriptOverride: fires on "I have a deadline / meeting / interview / trip" (time-bound event)', () => {
+  assert.equal(
+    applyTranscriptOverride(restraintVerdict(), [sampleUserMsg('I have a meeting tomorrow')]).decision,
+    'proceed',
+  )
+  assert.equal(
+    applyTranscriptOverride(restraintVerdict(), [sampleUserMsg('I have a deadline Friday')]).decision,
+    'proceed',
+  )
+  assert.equal(
+    applyTranscriptOverride(restraintVerdict(), [sampleUserMsg('I have an interview next week')]).decision,
+    'proceed',
+  )
+  assert.equal(
+    applyTranscriptOverride(restraintVerdict(), [sampleUserMsg('I have a flight on Tuesday')]).decision,
+    'proceed',
+  )
+})
+
+test('applyTranscriptOverride: fires on "this is a replacement for my X" / "I broke my X"', () => {
+  assert.equal(
+    applyTranscriptOverride(restraintVerdict(), [sampleUserMsg('this is a replacement for my broken one')]).decision,
+    'proceed',
+  )
+  assert.equal(
+    applyTranscriptOverride(restraintVerdict(), [sampleUserMsg('I broke my headphones yesterday')]).decision,
+    'proceed',
+  )
+  assert.equal(
+    applyTranscriptOverride(restraintVerdict(), [sampleUserMsg('I lost my old one')]).decision,
+    'proceed',
+  )
+})
+
+test('applyTranscriptOverride: does NOT fire on vague "I need new tech" (correctly restraint)', () => {
+  const v = restraintVerdict()
+  const out = applyTranscriptOverride(v, [sampleUserMsg('I need new tech')])
+  assert.equal(out, v, 'vague need does not trigger override')
+  assert.equal(out.decision, 'abandon')
+})
+
+test('applyTranscriptOverride: does NOT fire on "it is on sale" (sale is not a need)', () => {
+  const v = restraintVerdict()
+  const out = applyTranscriptOverride(v, [sampleUserMsg('it is on sale')])
+  assert.equal(out, v)
+  assert.equal(out.decision, 'abandon')
+})
+
+test('applyTranscriptOverride: does NOT fire on "I deserve it" / "I want it" alone (50/50 case stays)', () => {
+  const v = restraintVerdict()
+  assert.equal(applyTranscriptOverride(v, [sampleUserMsg('I want it')]).decision, 'abandon')
+  assert.equal(applyTranscriptOverride(v, [sampleUserMsg('I deserve it')]).decision, 'abandon')
+  assert.equal(applyTranscriptOverride(v, [sampleUserMsg('I like it')]).decision, 'abandon')
+  assert.equal(applyTranscriptOverride(v, [sampleUserMsg("it's nice")]).decision, 'abandon')
+})
+
+test('applyTranscriptOverride: fires once across multiple user messages (any of N user messages)', () => {
+  // User's first 2 messages are bare "I want it" (don't trigger).
+  // Third message is a real need (triggers).
+  const transcript = [
+    sampleUserMsg('I want it'),
+    sampleUserMsg('I want it because it looks nice'),
+    sampleUserMsg('my current one broke and I need a replacement for work'),
+  ]
+  const out = applyTranscriptOverride(restraintVerdict(), transcript)
+  assert.equal(out.decision, 'proceed')
+  assert.equal(out.confidence, 0.85)
+})
+
+test('applyTranscriptOverride: case-insensitive (uppercase "MY CURRENT ONE BROKE" still matches)', () => {
+  const transcript = [sampleUserMsg('MY CURRENT ONE BROKE AND I NEED A REPLACEMENT')]
+  const out = applyTranscriptOverride(restraintVerdict(), transcript)
+  assert.equal(out.decision, 'proceed')
+})
+
+test('applyTranscriptOverride: ignores prosecution messages (only defense/user messages are scanned)', () => {
+  // The prosecution might mention "my current one broke" when
+  // summarizing the user's case, or asking a question. The
+  // override should NOT fire from the prosecution's message.
+  const transcript = [
+    sampleProsecutionMsg('Did your current one break?'),
+    sampleUserMsg('no, I just want it'),
+  ]
+  const v = restraintVerdict()
+  const out = applyTranscriptOverride(v, transcript)
+  assert.equal(out, v)
+  assert.equal(out.decision, 'abandon')
+})
+
+test('applyTranscriptOverride: handles empty transcript safely', () => {
+  const v = restraintVerdict()
+  const out = applyTranscriptOverride(v, [])
+  assert.equal(out, v)
+  assert.equal(applyTranscriptOverride(v, [
+    { role: 'prosecution', text: 'something', ts: 1 },
+  ]), v)
+})
+
+test('applyTranscriptOverride: handles missing/empty user message text safely', () => {
+  const v = restraintVerdict()
+  const out = applyTranscriptOverride(v, [
+    { role: 'defense', text: '', ts: 1 },
+    { role: 'defense', text: '   ', ts: 2 },
+    { role: 'defense', text: null, ts: 3 },
+    { role: 'defense', text: undefined, ts: 4 },
+  ])
+  assert.equal(out, v)
+})
+
+test('applyTranscriptOverride: factors are exactly 3 strings (verdict type safety)', () => {
+  const out = applyTranscriptOverride(restraintVerdict(), [sampleUserMsg('my current one broke')])
+  assert.equal(out.topFactors.length, 3)
+  for (const f of out.topFactors) {
+    assert.equal(typeof f, 'string')
+    assert.ok(f.length > 0)
+  }
 })
 
 // === NEW: judge prompt top framing is "reflection", not "check on impulse" ===

@@ -1,6 +1,7 @@
 import { selectProvider, type AIProvider, type Cart, type ChatMessage, type JudgeCallOptions, type Product, type Verdict } from '@/lib/ai/provider.ts'
 import { prosecutionSystemPrompt, judgeSystemPrompt, type PromptDetail, type JudgeMode } from '@/lib/ai/prompts.ts'
 import { buildCounselOpeningUserPrompt, buildCounselRebuttalUserPrompt } from '@/lib/ai/counselUserPrompt.ts'
+import { applyTranscriptOverride } from '@/lib/ai/judgeParse.ts'
 import { recordAiCall } from '@/lib/ai/debug.ts'
 import { TRIAL_PORT, type TrialEvent, type TrialRequest } from '@/lib/messaging/bus.ts'
 import { log, warn } from '@/lib/utils/log.ts'
@@ -272,9 +273,17 @@ async function runJudge(
     )
   } else {
     const verdict = await provider.judgeVerdict({ systemPrompt, transcript, product, cart }, signal, opts)
-    result = { verdict, reasoning: '' }
-    onReasoning(result.reasoning)
+    result = { verdict, reasoning: verdict.summary ?? '' }
   }
+  // Apply transcript-pattern override: when the user has stated a
+  // concrete, specific use case anywhere in the trial AND the model
+  // ruled restraint, force PURCHASE at 0.85+. This is the user's
+  // explicit guarantee: "It should let you purchase if it identifies
+  // any sense of actual need." The model still has a residual
+  // restraint bias even with the reflection-session reframe; this
+  // code-level post-processor is the guarantee. See applyTranscriptOverride
+  // in lib/ai/judgeParse.ts for the pattern set and conservative rules.
+  result = { ...result, verdict: applyTranscriptOverride(result.verdict, transcript) }
   log(
     'SW runJudge done in',
     Date.now() - t0,
