@@ -616,7 +616,7 @@ export class BYOK implements AIProvider {
         return {
           decision,
           confidence: Number.isFinite(confidence) ? Math.max(0, Math.min(1, Math.round(confidence * 100) / 100)) : 0.6,
-          summary: summary.slice(0, 400),
+          summary,
           topFactors: [factors[0], factors[1], factors[2]],
         }
       }
@@ -625,7 +625,7 @@ export class BYOK implements AIProvider {
       return {
         decision,
         confidence: Number.isFinite(confidence) ? Math.max(0, Math.min(1, Math.round(confidence * 100) / 100)) : 0.6,
-        summary: summary.slice(0, 400),
+        summary,
         topFactors: ['Decision rendered', 'See analysis', 'Court reasoning'],
       }
     }

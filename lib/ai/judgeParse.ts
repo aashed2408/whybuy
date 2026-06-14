@@ -124,13 +124,16 @@ function buildSummary(body: string, decision: 'proceed' | 'abandon' | null): str
     return ''
   }
   // Take the first two sentence-ending chunks. "Sentence" is
-  // anything ending in `.`, `!`, or `?`.
+  // anything ending in `.`, `!`, or `?`. If the body is one giant
+  // run-on sentence (common for small models that forget to add
+  // sentence breaks), fall back to the whole body so the user still
+  // sees the judge's full paragraph.
   const sentences = body
     .split(/(?<=[.!?])\s+/)
     .map((s) => s.trim())
     .filter((s) => s.length > 0)
   const picked = sentences.slice(0, 2).join(' ')
-  return picked || body.slice(0, 400)
+  return picked || body
 }
 
 /**
@@ -207,7 +210,7 @@ export function verdictFromNatural(result: NaturalParseResult, fallbackReason = 
     return {
       decision: result.decision,
       confidence: result.confidence,
-      summary: result.summary.slice(0, 400),
+      summary: result.summary,
       topFactors: [result.factors[0], result.factors[1], result.factors[2]],
     }
   }
@@ -217,7 +220,7 @@ export function verdictFromNatural(result: NaturalParseResult, fallbackReason = 
   if (result.decision) {
     const fallbackSummary =
       result.summary ||
-      result.reasoning.slice(0, 400) ||
+      result.reasoning ||
       `The court reached a decision with ${Math.round((result.confidence ?? 0.6) * 100)}% confidence.`
     const factors =
       result.factors.length === 3
@@ -226,7 +229,7 @@ export function verdictFromNatural(result: NaturalParseResult, fallbackReason = 
     return {
       decision: result.decision,
       confidence: result.confidence ?? 0.6,
-      summary: fallbackSummary.slice(0, 400),
+      summary: fallbackSummary,
       topFactors: factors,
     }
   }

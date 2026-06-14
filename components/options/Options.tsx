@@ -630,13 +630,13 @@ export function Options() {
                   active={settings.judgeMode === 'natural'}
                   onClick={() => updateSetting('judgeMode', 'natural' as JudgeMode)}
                   label="Natural"
-                  detail="Line-based ruling (DECISION / CONFIDENCE / REASONING / SUMMARY / FACTORS). Default — works on small models."
+                  detail="A neutral paragraph weighing both arguments, ending with 'I rule in favor of the purchase.' or 'I rule in favor of restraint.' Default — works on small models."
                 />
                 <ChoiceButton
                   active={settings.judgeMode === 'structured'}
                   onClick={() => updateSetting('judgeMode', 'structured' as JudgeMode)}
                   label="Structured"
-                  detail="<think>…</think> analysis + JSON. Best on reasoning models like gpt-oss:20b."
+                  detail="Same paragraph shape as Natural. Kept for backwards compatibility with stored settings."
                 />
               </div>
             </div>
@@ -1034,7 +1034,7 @@ function JudgeModelEditor({
         Judge Model
       </div>
       <div style={{ fontSize: 12, color: 'rgba(247,238,215,0.65)', marginBottom: 10 }}>
-        The judge can use a different (typically reasoning-capable) model from the prosecution. Defaults to the counsel model. The judge writes a {'<think>...</think>'} analysis you can watch live in the deliberation screen.
+        The judge can use a different model from the prosecution. Defaults to the counsel model. Both the prosecution and the judge write a short paragraph weighing the case — the judge's ruling appears on the verdict card.
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>

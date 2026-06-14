@@ -1,11 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { Cart, Product, Verdict } from '@/lib/ai/types'
 import { CartSummary } from './CartSummary'
 import { ProductCardStack } from './ProductCard'
 
 /**
  * Full-screen verdict reveal. Three internal phases:
- *   1. `deliberating` — "Court is in session" + judge mark + reasoning panel.
+ *   1. `deliberating` — "Court is in session" + judge mark + product stack.
  *   2. `strike`     — 900 ms gavel-strike animation.
  *   3. `revealed`   — verdict card with staggered fade-in + action buttons.
  *
@@ -17,7 +17,6 @@ export function JudgeRoom({
   product,
   cart,
   verdict,
-  reasoning,
   onProceed,
   onAcceptLoss,
   onOverride,
@@ -25,8 +24,6 @@ export function JudgeRoom({
   product: Product
   cart: Cart | null
   verdict: Verdict | null
-  /** Running `<think>...</think>` text from the judge. Empty for the scripted fallback. */
-  reasoning: string
   onProceed: () => void
   onAcceptLoss: () => void
   onOverride: () => void
@@ -71,7 +68,6 @@ export function JudgeRoom({
   const confidencePct = verdict ? Math.round(verdict.confidence * 100) : 0
   const isCart = !!(cart && cart.items.length > 0)
   const showConfetti = phase === 'revealed' && isProceed
-  const hasReasoning = !!(reasoning && reasoning.length > 0)
 
   return (
     <div className={`whybuy-judge-room ${phase === 'allRise' ? 'all-rise' : ''} ${phase === 'strike' ? 'strike' : ''} ${phase === 'revealed' ? 'revealed' : ''}`}>
@@ -100,24 +96,17 @@ export function JudgeRoom({
           </div>
           <div className="whybuy-judge-sub">
             {phase === 'deliberating'
-              ? hasReasoning
-                ? 'The judge is reviewing the record. Watch the reasoning below.'
-                : 'The judge is reviewing the record. Stand by.'
+              ? 'The judge is reviewing the record. Stand by.'
               : phase === 'allRise'
               ? 'The court is about to render its decision.'
               : 'The judge has reached a decision.'}
           </div>
           {phase === 'deliberating' && <div className="whybuy-judge-typing">· · ·</div>}
 
-          {phase === 'deliberating' && (
-            <>
-              {cart && cart.items.length > 0 && (
-                <div style={{ width: 'min(720px, 96vw)', maxHeight: 220, overflowY: 'auto', margin: '12px auto 0' }}>
-                  <ProductCardStack cart={cart} />
-                </div>
-              )}
-              <ReasoningPanel reasoning={reasoning} active={hasReasoning} />
-            </>
+          {phase === 'deliberating' && cart && cart.items.length > 0 && (
+            <div style={{ width: 'min(720px, 96vw)', maxHeight: 220, overflowY: 'auto', margin: '12px auto 0' }}>
+              <ProductCardStack cart={cart} />
+            </div>
           )}
         </div>
       )}
@@ -185,7 +174,6 @@ export function JudgeRoom({
           </div>
           <div className="whybuy-reveal-line" style={{ width: '100%' }}>
             <div className="whybuy-divider" style={{ margin: '8px 0 12px' }} />
-            {hasReasoning && <RevealedReasoning reasoning={reasoning} />}
             <div style={{ fontSize: 11, letterSpacing: '0.2em', textTransform: 'uppercase', color: '#c9a14a', marginBottom: 8, textAlign: 'left' }}>
               Decisive Factors
             </div>
@@ -310,121 +298,6 @@ function JudgeMark() {
       {/* Sound block */}
       <rect x="74" y="160" width="44" height="6" rx="2" fill="#c9a14a" />
     </svg>
-  )
-}
-
-/**
- * Live typewriter panel for the judge's `<think>...</think>` reasoning.
- * Auto-scrolls to the bottom as new text arrives. Empty when no
- * reasoning is available (e.g. scripted fallback). Uses a darker
- * parchment tone to feel "in the judge's chambers" rather than
- * user-facing copy.
- */
-function ReasoningPanel({ reasoning, active }: { reasoning: string; active: boolean }) {
-  const ref = useRef<HTMLDivElement | null>(null)
-  useEffect(() => {
-    if (ref.current) ref.current.scrollTop = ref.current.scrollHeight
-  }, [reasoning])
-
-  return (
-    <div
-      style={{
-        width: 'min(560px, 92vw)',
-        maxHeight: 200,
-        margin: '16px auto 0',
-        background: 'rgba(15, 8, 4,0.55)',
-        border: '1px solid rgba(201,161,74,0.32)',
-        borderRadius: 6,
-        padding: '10px 14px',
-        textAlign: 'left',
-        position: 'relative',
-      }}
-    >
-      <div
-        style={{
-          fontSize: 9,
-          letterSpacing: '0.3em',
-          textTransform: 'uppercase',
-          color: 'rgba(201,161,74,0.75)',
-          marginBottom: 6,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-        }}
-      >
-        {active && <span className="whybuy-bench-pulse" style={{ width: 6, height: 6 }} />}
-        Judge's Reasoning
-      </div>
-      <div
-        ref={ref}
-        style={{
-          fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-          fontSize: 12,
-          lineHeight: 1.55,
-          color: 'rgba(247,238,215,0.85)',
-          whiteSpace: 'pre-wrap',
-          wordBreak: 'break-word',
-          maxHeight: 160,
-          overflowY: 'auto',
-          minHeight: 28,
-        }}
-      >
-        {reasoning || (active ? '' : '— reasoning not available for this provider —')}
-        {active && reasoning && <span className="whybuy-cursor-blink" />}
-      </div>
-    </div>
-  )
-}
-
-/**
- * Collapsed reasoning shown below the verdict. Lets the user re-read the
- * judge's analysis after the ruling is delivered. Defaults to collapsed
- * to keep the verdict card uncluttered.
- */
-function RevealedReasoning({ reasoning }: { reasoning: string }) {
-  const [open, setOpen] = useState(false)
-  if (!reasoning) return null
-  return (
-    <div style={{ marginBottom: 12, textAlign: 'left' }}>
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        style={{
-          background: 'transparent',
-          border: '1px solid rgba(201,161,74,0.3)',
-          color: '#e6c578',
-          fontSize: 10,
-          letterSpacing: '0.2em',
-          textTransform: 'uppercase',
-          padding: '4px 10px',
-          borderRadius: 3,
-          cursor: 'pointer',
-          marginBottom: open ? 8 : 0,
-        }}
-        title="Show the judge's step-by-step reasoning"
-      >
-        {open ? 'Hide reasoning' : 'Show reasoning'}
-      </button>
-      {open && (
-        <div
-          style={{
-            fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-            fontSize: 12,
-            lineHeight: 1.55,
-            color: 'rgba(247,238,215,0.78)',
-            background: 'rgba(15, 8, 4,0.4)',
-            border: '1px solid rgba(201,161,74,0.2)',
-            borderRadius: 4,
-            padding: '8px 12px',
-            whiteSpace: 'pre-wrap',
-            maxHeight: 200,
-            overflowY: 'auto',
-          }}
-        >
-          {reasoning}
-        </div>
-      )}
-    </div>
   )
 }
 

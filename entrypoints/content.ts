@@ -138,19 +138,21 @@ async function openTrial(args: {
         log('Proceeding from URL-triggered trial for', product.name)
       }
     },
-    onAbandon: (verdict) => {
-      if (epoch !== trialEpoch) return
-      void recordOutcome(product, cart, verdict, false, [])
+    onAbandon: (_verdict) => {
+      // Recording is handled by the `onTranscript` callback (which
+      // carries the full transcript). This callback exists so the
+      // trial app can also surface "user accepted the ruling" in
+      // the activity log without double-recording.
     },
-    onOverride: (verdict) => {
+    onOverride: (_verdict) => {
       if (epoch !== trialEpoch) return
-      void recordOutcome(product, cart, verdict, true, [])
-      // Override means the user is going through despite the
-      // verdict. The previous behavior was to dump the user back on
-      // the cart page with no navigation, which then re-triggered
-      // the trial on the next click (infinite loop). Fix: close the
-      // trial AND re-dispatch the original "Proceed to checkout"
-      // click so the user actually goes to checkout.
+      // Recording is handled by the `onTranscript` callback. This
+      // callback owns the side effects the `onTranscript` path
+      // can't: closing the trial and re-dispatching the original
+      // "Proceed to checkout" click so the user actually navigates
+      // to the checkout page. The previous behavior was to dump the
+      // user back on the cart page with no navigation, which then
+      // re-triggered the trial on the next click (infinite loop).
       const c = activeController
       activeController = null
       c?.close()
@@ -199,22 +201,48 @@ function extractSubject(): { product: Product; cart: Cart | null } {
   return { product, cart: product.cart ?? null }
 }
 
+/**
+ * Re-fire the user's original "Proceed to checkout" click so the page
+ * actually navigates. Called from `onProceed` (proceed verdict) and
+ * `onOverride` (abandon verdict + user disagrees).
+ *
+ * Implementation note: we use the element's native `.click()` method,
+ * NOT a synthetic `MouseEvent` dispatched via `dispatchEvent`. A
+ * synthetic event is observed by other listeners but does NOT trigger
+ * the default action for `<a href>` links or form submit buttons, so
+ * the page would never actually navigate to checkout. The native click
+ * method runs the same handler chain as a real user click AND
+ * executes the default action (link navigation / form submission).
+ *
+ * For `<a href>` elements we also fall back to setting `location.href`
+ * directly, in case the original click had an event handler that
+ * called `preventDefault()` (some Amazon checkout buttons do).
+ */
 function reDispatch(event: MouseEvent, product: Product): void {
   suppressNextClicks = 1
+  const target = event.target as Element | null
+  const href = target instanceof HTMLAnchorElement ? target.href : null
+  const origin = location.origin
   setTimeout(() => {
     try {
-      const target = event.target as Element | null
       if (target && document.contains(target)) {
-        const fresh = new MouseEvent('click', {
-          bubbles: true,
-          cancelable: true,
-          view: window,
-          button: 0,
-          clientX: event.clientX,
-          clientY: event.clientY,
-        })
-        target.dispatchEvent(fresh)
-        log('Re-dispatched click for', product.name)
+        log('Re-dispatching click via .click() for', product.name)
+        // .click() runs the element's own click handler AND executes
+        // the default action (link navigation, form submit, etc.).
+        ;(target as HTMLElement).click()
+        // Belt-and-suspenders for <a href> elements: if 100ms later
+        // we're still on the same origin, force-navigate. Some Amazon
+        // checkout buttons have an on-page click handler that calls
+        // preventDefault() before our interceptor can stop them, and
+        // .click() on such elements is a no-op for navigation.
+        if (href) {
+          setTimeout(() => {
+            if (location.origin === origin) {
+              log('Native .click() did not navigate; forcing location.href =', href)
+              location.href = href
+            }
+          }, 100)
+        }
         return
       }
     } catch (e) {
@@ -238,7 +266,7 @@ async function recordOutcome(
       await setCooldown(product, cart, verdict.confidence)
     }
     await appendHistory({
-      id: crypto.randomUUID(),
+      id: newRecordId(),
       ts: Date.now(),
       product,
       cart,
@@ -257,3 +285,25 @@ async function recordOutcome(
 
 window.addEventListener('error', (e) => warn('window error:', e.message))
 window.addEventListener('unhandledrejection', (e) => warn('unhandled rejection:', e.reason))
+
+/**
+ * Build a unique ID for a trial record. `crypto.randomUUID()` is the
+ * preferred path but it is NOT always available in content-script
+ * contexts — only on secure origins (https / localhost / file://) and
+ * in browsers that expose the Web Crypto API in the isolated world.
+ * WhyBuy runs on every http(s) page including non-secure origins, so
+ * we fall back to a `Math.random()`-based ID. The collision odds for
+ * the last 200 trial records are negligible (52 bits of entropy per
+ * record).
+ */
+function newRecordId(): string {
+  try {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID()
+    }
+  } catch {
+    // crypto is a forbidden host object in some sandboxes — treat
+    // it as "not available" and fall through.
+  }
+  return `rec-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`
+}

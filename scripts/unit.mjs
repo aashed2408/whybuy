@@ -1253,6 +1253,44 @@ test('verdictFromNatural: empty result returns the cautious fallback', () => {
   assert.match(v.summary, /Default ruling|cautious/)
 })
 
+test('verdictFromNatural: long summary is NOT truncated at 400 chars', () => {
+  // The parser used to slice the summary at 400 chars, which cut the
+  // judge's paragraph off mid-word (e.g. "its perceiv"). The summary
+  // now flows through untouched so the user reads the full paragraph.
+  // buildSummary() returns the first 2 sentences, which for a long
+  // multi-sentence paragraph is well over 400 chars.
+  const longPara =
+    'The prosecution argues that the defendant\'s purchase of "Louis Vuitton: The Complete Fashion Collections" ' +
+    'was financially irresponsible and potentially fraudulent, citing inconsistencies in the advertised completeness ' +
+    'and authenticity, and suggesting the defendant prioritized status and emotional justification over due diligence. ' +
+    'The defense counters that the collection\'s value lies in its perceived exclusivity and brand heritage, ' +
+    'and that the price reflects a long-term wardrobe investment rather than a one-off impulse. ' +
+    'After weighing both arguments, the prosecution has presented concrete red flags about provenance while ' +
+    'the defense relies on abstract brand equity, and concrete red flags outweigh abstract equity.'
+  const v = verdictFromNatural(parseNaturalVerdict(longPara + '\nI rule in favor of restraint.'))
+  assert.equal(v.decision, 'abandon')
+  assert.ok(v.summary.length > 400, `summary should not be capped at 400 chars, got ${v.summary.length}`)
+  assert.match(v.summary, /perceived exclusivity/)
+  assert.doesNotMatch(v.summary, /percei[^v]$/m)
+})
+
+test('verdictFromNatural: long reasoning fallback is NOT truncated at 400 chars', () => {
+  // Partial result with a decision but a one-giant-runon sentence
+  // body — buildSummary can't split on sentence terminators (there's
+  // only one sentence), so the WHOLE body becomes the summary. Make
+  // sure the result.summary / result.reasoning fallback in
+  // verdictFromNatural does NOT slice it at 400 chars.
+  const longRunon = 'Prosecution made strong points about the cost, the defense offered no concrete rebuttal, and the court notes that the evidence was overwhelmingly on one side '.repeat(20).trim()
+  const parsed = parseNaturalVerdict(longRunon + '\nI rule in favor of restraint.')
+  // The single-sentence body means buildSummary returns the whole
+  // runon as the summary (not the 2-sentence pick).
+  assert.ok(parsed.summary.length > 400, `expected parsed.summary to be the full runon, got ${parsed.summary.length}`)
+  const v = verdictFromNatural(parsed)
+  assert.equal(v.decision, 'abandon')
+  assert.ok(v.summary.length > 400, `fallback summary should not be capped at 400 chars, got ${v.summary.length}`)
+  assert.match(v.summary, /Prosecution made strong points about the cost/)
+})
+
 // === normalizeDecision extended synonyms ===
 
 test('normalizeDecision: in-favor-of-restraint is abandon', () => {
@@ -1364,6 +1402,64 @@ test('judgeSystemPrompt: paragraph + ruling line, no think/JSON/labeled fields',
   assert.doesNotMatch(p, /SUMMARY:/)
   assert.doesNotMatch(p, /FACTORS:/)
   assert.doesNotMatch(p, /<think>/)
+})
+
+// === newRecordId (content.ts fallback for crypto.randomUUID) ===
+//
+// `crypto.randomUUID()` is not always available in content-script
+// contexts (it is only exposed on secure origins in some browser
+// versions). WhyBuy records trial outcomes in `chrome.storage.local`
+// with an `id` field, so we need a fallback that works everywhere.
+
+function newRecordId() {
+  try {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID()
+    }
+  } catch {}
+  return `rec-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`
+}
+
+test('newRecordId: returns a non-empty string', () => {
+  const id = newRecordId()
+  assert.ok(typeof id === 'string')
+  assert.ok(id.length > 0)
+})
+
+test('newRecordId: 1000 calls produce 1000 unique IDs', () => {
+  const ids = new Set()
+  for (let i = 0; i < 1000; i++) ids.add(newRecordId())
+  assert.equal(ids.size, 1000, 'expected 1000 unique IDs, got ' + ids.size)
+})
+
+test('newRecordId: fallback uses rec- prefix and includes timestamp + random', () => {
+  // Stub out crypto.randomUUID to force the fallback path. We have to
+  // delete the property to make the `typeof crypto.randomUUID ===
+  // 'function'` check return false; we also delete `crypto` itself to
+  // exercise the `typeof crypto === 'undefined'` branch.
+  const origCrypto = globalThis.crypto
+  try {
+    delete globalThis.crypto
+    const id = newRecordId()
+    assert.match(id, /^rec-/)
+    assert.ok(id.length > 'rec-'.length, 'expected timestamp + random suffix')
+  } finally {
+    if (origCrypto !== undefined) globalThis.crypto = origCrypto
+  }
+})
+
+test('newRecordId: uses crypto.randomUUID when available', () => {
+  const origCrypto = globalThis.crypto
+  let calls = 0
+  try {
+    globalThis.crypto = { randomUUID: () => { calls++; return 'uuid-from-stub' } }
+    const id = newRecordId()
+    assert.equal(id, 'uuid-from-stub')
+    assert.equal(calls, 1)
+  } finally {
+    if (origCrypto !== undefined) globalThis.crypto = origCrypto
+    else delete globalThis.crypto
+  }
 })
 
 test('judgeSystemPrompt({judgeMode:"structured"}) uses the same paragraph shape', () => {

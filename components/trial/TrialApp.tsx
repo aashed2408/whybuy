@@ -46,7 +46,6 @@ export function TrialApp(props: TrialProps) {
   const [aiTimedOut, setAiTimedOut] = useState<boolean>(false)
   const [callingAiSince, setCallingAiSince] = useState<number | null>(null)
   const [lastError, setLastError] = useState<string | null>(null)
-  const [judgeReasoning, setJudgeReasoning] = useState<string>('')
   const portRef = useRef<chrome.runtime.Port | null>(null)
   const aiTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -128,15 +127,15 @@ export function TrialApp(props: TrialProps) {
         dispatch({ type: 'AI_DONE', text: ev.text, speaker: 'prosecution' })
         break
       case 'JUDGE_REASONING_CHUNK':
-        // Stream the running `<think>...</think>` text. The user sees this
-        // live during deliberation. We do NOT clear the AI timeout — the
-        // judge is still working until the VERDICT event.
+        // The judge streamed a reasoning chunk. We don't display the
+        // reasoning anymore (the live trace was removed) but we still
+        // reset the "AI is taking too long" timer so the spinner
+        // doesn't time out while the judge is making progress.
         if (aiTimeoutRef.current) {
           clearTimeout(aiTimeoutRef.current)
           aiTimeoutRef.current = null
         }
         setCallingAiSince(null)
-        setJudgeReasoning(ev.text)
         break
       case 'VERDICT':
         if (aiTimeoutRef.current) {
@@ -304,7 +303,6 @@ export function TrialApp(props: TrialProps) {
   // When phase enters deliberation, request the judge verdict.
   useEffect(() => {
     if (state.phase !== 'deliberation') return
-    setJudgeReasoning('')
     const t = setTimeout(() => {
       setCallingAiSince(Date.now())
       sendRequest({ type: 'JUDGE', product: state.product, cart, transcript: state.transcript })
@@ -405,7 +403,6 @@ export function TrialApp(props: TrialProps) {
         verdict={state.verdict}
         product={state.product}
         cart={cart}
-        reasoning={judgeReasoning}
         onProceed={handleProceed}
         onAcceptLoss={handleAcceptLoss}
         onOverride={handleOverride}

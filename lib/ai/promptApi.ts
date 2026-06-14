@@ -272,7 +272,7 @@ function tryParseStructured(raw: string): Verdict | null {
     const obj = JSON.parse(cleaned)
     if (obj && (obj.decision === 'proceed' || obj.decision === 'abandon')) {
       const confidence = Number(obj.confidence)
-      const summary = String(obj.summary ?? '').slice(0, 400)
+        const summary = String(obj.summary ?? '')
       const factors = Array.isArray(obj.topFactors) ? obj.topFactors.slice(0, 3).map((x: any) => String(x)) : []
       if (
         typeof confidence === 'number' &&
