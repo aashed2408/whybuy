@@ -237,7 +237,9 @@ export class PromptApiProvider implements AIProvider {
       // Both modes now use the same paragraph + ruling line shape.
       // The structured-mode option is kept for backwards compatibility
       // with stored settings; it no longer requires think/JSON.
-      'Weigh the two arguments above. Your analysis can ONLY reference arguments the prosecution or the defense ACTUALLY MADE in the transcript — do not invent facts, do not assume the user\'s motivations, do not fabricate arguments neither side made. If the defense wrote something like "I want it" and nothing else, that IS their entire argument — say so plainly. Then end with exactly one of these two lines on its own line: "I rule in favor of the purchase." or "I rule in favor of restraint." Nothing after the ruling line.'
+      // The model now also emits a CONFIDENCE: 0.XX line and a
+      // DECISIVE FACTORS list — see judgeParse.ts for the parser.
+      'Weigh the two arguments above. Your analysis can ONLY reference arguments the prosecution or the defense ACTUALLY MADE in the transcript — do not invent facts, do not assume the user\'s motivations, do not fabricate arguments neither side made. If the defense wrote something like "I want it" and nothing else, that IS their entire argument — say so plainly. Then end your response in this order: (1) the ruling line ("I rule in favor of the purchase." or "I rule in favor of restraint.") on its own line, (2) a CONFIDENCE: 0.XX line on its own line (e.g. CONFIDENCE: 0.78), and (3) a DECISIVE FACTORS: header followed by exactly 3 bullet points, one per line, each referencing something the prosecution or defense actually said. Nothing else after the bullets. See the system prompt for the full format and the confidence calibration.'
 
     const userPrompt = `${subjectLine}\n\nFULL TRANSCRIPT (this is the ONLY evidence; you may not reference anything outside it):\n${transcript}\n\n${tail}`
 

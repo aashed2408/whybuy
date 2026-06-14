@@ -4,24 +4,29 @@ import type { Verdict } from './types.ts'
 /**
  * Parser for the judge output.
  *
- * The model is asked to produce a single paragraph (3-5 sentences)
- * weighing the prosecution's and defense's arguments, ending with
- * exactly one of these two lines on its own line:
+ * The model is asked to produce, in this exact order:
  *
- *   I rule in favor of the purchase.
- *   I rule in favor of restraint.
+ *   [3-5 sentence paragraph weighing the two arguments]
+ *
+ *   CONFIDENCE: 0.XX
+ *   I rule in favor of the purchase.   (or: I rule in favor of restraint.)
+ *
+ *   DECISIVE FACTORS:
+ *   - <factor 1, one short clause referencing the transcript>
+ *   - <factor 2>
+ *   - <factor 3>
  *
  * The parser:
  *   - finds the ruling line (case-insensitive, tolerant of trailing
  *     punctuation, tolerant of code fences / preambles via
  *     `sanitizeNaturalOutput`)
- *   - derives confidence from the paragraph's hedging language
- *     (e.g. "clearly" → 0.85, "borderline" → 0.55)
+ *   - extracts CONFIDENCE from the explicit "CONFIDENCE: 0.XX" line
+ *     (falls back to hedge detection if missing)
  *   - builds the verdict summary from the first 1-2 sentences of
  *     the paragraph
- *   - uses a fixed 3-factor list for the decisive factors (the
- *     model isn't required to produce them; the user-facing UI
- *     needs exactly three)
+ *   - extracts the 3 DECISIVE FACTORS from the model output (falls
+ *     back through: numbered list → derived from the paragraph →
+ *     hardcoded strings as a last resort)
  *
  * The parser is idempotent and never throws. A failed parse
  * returns a `partial: true` result; the caller decides what to
@@ -30,7 +35,7 @@ import type { Verdict } from './types.ts'
 export interface NaturalParseResult {
   decision: 'proceed' | 'abandon' | null
   confidence: number | null
-  /** The full paragraph the model wrote, sans the ruling line. */
+  /** The full paragraph the model wrote, sans the ruling line, CONFIDENCE line, and DECISIVE FACTORS list. */
   reasoning: string
   /** The first 1-2 sentences of the paragraph. Becomes `verdict.summary`. */
   summary: string
@@ -49,6 +54,19 @@ export interface NaturalParseResult {
  */
 const RULING_FOR_PURCHASE_RE = /^[ \t]*I[ \t]+rule[ \t]+in[ \t]+favor[ \t]+of[ \t]+the[ \t]+purchase\b[ \t]*[.!?]*[ \t]*$/im
 const RULING_FOR_RESTRAINT_RE = /^[ \t]*I[ \t]+rule[ \t]+in[ \t]+favor[ \t]+of[ \t]+restraint\b[ \t]*[.!?]*[ \t]*$/im
+
+/**
+ * The CONFIDENCE: 0.XX line the model is told to emit. We extract
+ * the first valid number after the "CONFIDENCE:" prefix.
+ */
+const CONFIDENCE_RE = /\bCONFIDENCE\s*:\s*(0?\.\d+|[01](?:\.0+)?)\b/i
+
+/**
+ * The DECISIVE FACTORS: header followed by a list of bullets. We
+ * accept 1-5 bullets and trim to 3.
+ */
+const FACTORS_HEADER_RE = /\bDECISIVE\s+FACTORS\s*:\s*\n([\s\S]+?)(?:\n\s*\n|$)/i
+const BULLET_RE = /^[ \t]*[-•*][ \t]+(.+)$/gm
 
 /**
  * Parse a judge's response. Always returns a result object; never
@@ -86,25 +104,44 @@ export function parseNaturalVerdict(raw: string): NaturalParseResult {
     decision = lenientDecisionFromBody(sanitized)
   }
 
-  // Strip the ruling line(s) from the body so the rest is the
-  // paragraph-only reasoning.
+  // Extract the explicit CONFIDENCE: 0.XX line if present. Falls
+  // back to hedge detection below if missing.
+  const confidenceMatch = sanitized.match(CONFIDENCE_RE)
+  const explicitConfidence = confidenceMatch ? clampConfidence(confidenceMatch[1]) : null
+
+  // Extract the DECISIVE FACTORS list if present. Falls back
+  // through numbered-list → paragraph-derived → hardcoded below.
+  const explicitFactors = extractFactors(sanitized)
+
+  // Strip the ruling line(s), CONFIDENCE line, and DECISIVE
+  // FACTORS block from the body so the rest is the paragraph-only
+  // reasoning.
   const body = sanitized
     .replace(RULING_FOR_PURCHASE_RE, '')
     .replace(RULING_FOR_RESTRAINT_RE, '')
+    .replace(CONFIDENCE_RE, '')
+    .replace(FACTORS_HEADER_RE, '')
     .trim()
 
-  // Derive confidence from the paragraph's hedging language.
-  const confidence = decision ? confidenceFromHedges(body) : null
+  // Derive confidence. Prefer the explicit CONFIDENCE: line; fall
+  // back to hedge detection in the paragraph.
+  const confidence = decision
+    ? explicitConfidence != null
+      ? explicitConfidence
+      : confidenceFromHedges(body)
+    : null
 
   // Build the summary: first 1-2 sentences of the paragraph.
   const summary = buildSummary(body, decision)
 
-  // Three decisive factors based on the decision. The model isn't
-  // required to produce these — the UI just needs three rows.
+  // Three decisive factors. Fall back through: explicit model
+  // factors → numbered list → paragraph-derived → hardcoded.
   const factors = decision
-    ? decision === 'proceed'
-      ? ['Defense addressed key concerns', 'Reasonable necessity established', 'Price justified for stated use']
-      : ['Prosecution made the stronger case', 'Cost outweighs demonstrated need', 'Safer to reconsider']
+    ? (explicitFactors.length === 3
+        ? explicitFactors
+        : explicitFactors.length > 0
+          ? padFactors(explicitFactors, body, decision)
+          : deriveFactorsFromParagraph(body, decision))
     : []
 
   const partial = !(decision && confidence != null && summary.length > 0 && factors.length === 3)
@@ -241,6 +278,152 @@ function fallbackFactors(decision: 'proceed' | 'abandon'): [string, string, stri
     return ['User addressed concerns', 'Price justified by use', 'No cheaper alternative established']
   }
   return ['Concerns not addressed', 'Cost not justified', 'Safer to wait']
+}
+
+/**
+ * Extract the DECISIVE FACTORS bullet list from the model output.
+ * Accepts the explicit "DECISIVE FACTORS:" header + "- bullet" lines,
+ * OR a standalone numbered list ("1. X\n2. Y\n3. Z") as a fallback.
+ *
+ * Each bullet is sanitized to a single short clause (max ~200 chars,
+ * stripped of leading/trailing punctuation and markdown). The list is
+ * truncated to 3 entries (the UI's hard requirement).
+ *
+ * Returns an empty array if no bullet list is found — the caller
+ * then falls through to `deriveFactorsFromParagraph`.
+ */
+export function extractFactors(text: string): string[] {
+  if (!text) return []
+
+  // Pass 1: explicit "DECISIVE FACTORS:" header + bullets.
+  const headerMatch = text.match(FACTORS_HEADER_RE)
+  if (headerMatch) {
+    const block = headerMatch[1]
+    const bullets: string[] = []
+    let m
+    BULLET_RE.lastIndex = 0
+    while ((m = BULLET_RE.exec(block)) !== null) {
+      const cleaned = sanitizeBullet(m[1])
+      if (cleaned) bullets.push(cleaned)
+      if (bullets.length >= 3) break
+    }
+    if (bullets.length > 0) return bullets
+  }
+
+  // Pass 2: numbered list (1. X / 2. Y / 3. Z) anywhere in the text.
+  const numbered: string[] = []
+  const numberedRe = /^[ \t]*\d+[.)][ \t]+(.+)$/gm
+  let nm
+  while ((nm = numberedRe.exec(text)) !== null) {
+    const cleaned = sanitizeBullet(nm[1])
+    if (cleaned) numbered.push(cleaned)
+    if (numbered.length >= 3) break
+  }
+  return numbered.slice(0, 3)
+}
+
+/**
+ * Sanitize a single bullet/numbered factor string:
+ *   - cap at 200 chars (UI requirement + safety against model
+ *     injection of long markdown / scripts)
+ *   - strip surrounding markdown emphasis
+ *   - trim punctuation
+ *   - collapse internal whitespace
+ */
+function sanitizeBullet(raw: string): string {
+  let s = raw.replace(/^[\s*_~`]+|[\s*_~`]+$/g, '').replace(/`+/g, '').trim()
+  s = s.replace(/^[\s"'`\*_~>]+|[\s"'`\*_~<]+$/g, '')
+  s = s.replace(/\s+/g, ' ')
+  // Strip bold/italic markers that flank a single word at the
+  // start of the bullet (e.g. "**bold** factor" -> "bold
+  // factor", "*italic* factor" -> "italic factor",
+  // `"quoted" factor` -> "quoted factor"). The marker on the
+  // closing side is in the middle of the string (right after the
+  // word), not at the end, so we match it specifically.
+  s = s.replace(/^[*_~`]+/, '').replace(/[*_~`]+(\s|$)/, '$1')
+  s = s.replace(/^"([^"]+?)"\s+/, '$1 ').replace(/\s+"$/, '')
+  s = s.replace(/^'([^']+?)'\s+/, "$1 ").replace(/\s+'$/, '')
+  // Also strip any remaining internal closing markers from
+  // patterns like "**bold** factor" where both markers are
+  // adjacent to a single word.
+  s = s.replace(/(\w)\*\*\s+(\w)/g, '$1 $2').replace(/(\w)\*\s+(\w)/g, '$1 $2')
+  s = s.replace(/(\w)"\s+(\w)/g, '$1 $2').replace(/(\w)'\s+(\w)/g, '$1 $2')
+  s = s.replace(/\*+/g, '').replace(/`/g, '')
+  if (s.length > 200) s = s.slice(0, 197) + '...'
+  return s
+}
+
+/**
+ * Pad a partial factor list to 3 entries by deriving the missing
+ * ones from the paragraph. Falls back to the hardcoded 3-string
+ * list as a last resort.
+ */
+function padFactors(
+  existing: string[],
+  body: string,
+  decision: 'proceed' | 'abandon',
+): [string, string, string] {
+  const derived = deriveFactorsFromParagraph(body, decision)
+  const out: string[] = [...existing]
+  for (const f of derived) {
+    if (out.length >= 3) break
+    if (!out.some((e) => e.toLowerCase() === f.toLowerCase())) out.push(f)
+  }
+  while (out.length < 3) {
+    const fb = fallbackFactors(decision)
+    const candidate = fb[out.length]
+    if (!out.some((e) => e.toLowerCase() === candidate.toLowerCase())) out.push(candidate)
+    else out.push(candidate) // accept the duplicate as last resort
+  }
+  return [out[0], out[1], out[2]]
+}
+
+/**
+ * Derive 3 short factors from the paragraph itself when the model
+ * didn't produce an explicit factor list. Strategy:
+ *   - Split the paragraph into sentences
+ *   - Prefer sentences that name a side (prosecution / defense /
+ *     user) or contain "specific" / "need" / "want" / "concern" / "counter"
+ *   - Truncate each to ~100 chars
+ *   - If we don't have 3, pad with the existing hardcoded 3-string
+ *     list as a last resort
+ */
+function deriveFactorsFromParagraph(
+  body: string,
+  decision: 'proceed' | 'abandon',
+): [string, string, string] {
+  if (!body) return fallbackFactors(decision)
+  const sentences = body
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0)
+
+  // Score each sentence: prefer ones that name a side or contain
+  // a "decisive" keyword.
+  const scored = sentences.map((s) => {
+    const lower = s.toLowerCase()
+    let score = 0
+    if (/\b(prosecution|defense|user|judge|record)\b/.test(lower)) score += 3
+    if (/\b(specific|need|want|concern|counter|address|overcome)\b/.test(lower)) score += 2
+    if (/\b(argue|claim|stated|reason|point|objection)\b/.test(lower)) score += 1
+    return { s, score }
+  })
+  scored.sort((a, b) => b.score - a.score)
+
+  const picked: string[] = []
+  for (const { s } of scored) {
+    const trimmed = s.length > 120 ? s.slice(0, 117) + '...' : s
+    if (!picked.some((p) => p.toLowerCase() === trimmed.toLowerCase())) picked.push(trimmed)
+    if (picked.length >= 3) break
+  }
+  // Pad with hardcoded if we couldn't find 3 distinct sentences.
+  while (picked.length < 3) {
+    const fb = fallbackFactors(decision)
+    const candidate = fb[picked.length]
+    if (!picked.some((p) => p.toLowerCase() === candidate.toLowerCase())) picked.push(candidate)
+    else picked.push(candidate)
+  }
+  return [picked[0], picked[1], picked[2]]
 }
 
 function empty(): NaturalParseResult {

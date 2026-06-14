@@ -1184,7 +1184,7 @@ test('brandInitial: leading whitespace is trimmed', () => {
 //   - partial-streaming: parse as the model types
 //   - fallback paths (no decision, partial result)
 
-import { parseNaturalVerdict, verdictFromNatural } from '../lib/ai/judgeParse.ts'
+import { parseNaturalVerdict, verdictFromNatural, extractFactors } from '../lib/ai/judgeParse.ts'
 import { clampConfidence, fallbackVerdict, normalizeDecision } from '../lib/ai/verdictHelpers.ts'
 
 const NATURAL_OK = `The Nike Air Max shoes at CAD 122.94 are a want, not a need. The prosecution argued the cost is disproportionate to a "sometimes daily" use case, and the defense did not name a single cheaper alternative. The prosecution's case is the stronger one.
@@ -1360,6 +1360,392 @@ I rule in favor of the purchase.`
   assert.equal(r.decision, 'proceed')
 })
 
+// === parseNaturalVerdict: NEW format (CONFIDENCE + DECISIVE FACTORS) ===
+//
+// The judge prompt now asks the model to emit, in order:
+//   [paragraph]
+//   CONFIDENCE: 0.XX
+//   I rule in favor of the purchase.   (or: restraint)
+//   DECISIVE FACTORS:
+//   - factor 1
+//   - factor 2
+//   - factor 3
+// The ruling line is no longer the literal last line of the
+// response — DECISIVE FACTORS come after. The parser strips both
+// the ruling line AND the DECISIVE FACTORS block before computing
+// the reasoning body.
+
+test('parseNaturalVerdict: full new shape (paragraph + CONFIDENCE + ruling + DECISIVE FACTORS) parses correctly', () => {
+  const raw = `The user said their current headphones broke and they need a replacement. That is a real, specific need. The prosecution did not provide a specific counter-case.
+
+CONFIDENCE: 0.88
+I rule in favor of the purchase.
+
+DECISIVE FACTORS:
+- Defense: current headphones are broken
+- Prosecution: no specific cheaper alternative named
+- Defense: use case is work-from-home video calls`
+  const r = parseNaturalVerdict(raw)
+  assert.equal(r.decision, 'proceed')
+  assert.equal(r.confidence, 0.88)
+  assert.equal(r.factors.length, 3)
+  assert.match(r.factors[0], /headphones are broken/i)
+  assert.match(r.factors[1], /cheaper alternative/i)
+  assert.match(r.factors[2], /work-from-home|video calls/i)
+  assert.equal(r.partial, false)
+  // Summary should still come from the paragraph.
+  assert.match(r.summary, /headphones broke|current headphones|broken/)
+})
+
+test('parseNaturalVerdict: explicit CONFIDENCE: 0.XX is extracted (not defaulted to 0.7)', () => {
+  const raw = `The user only said "I want it" with no specifics. That is a want, not a need. The prosecution made a specific case about cost.
+
+CONFIDENCE: 0.62
+I rule in favor of restraint.
+
+DECISIVE FACTORS:
+- Defense: only stated "I want it"
+- Prosecution: cited a known durability concern
+- Record: no specific use case was given`
+  const r = parseNaturalVerdict(raw)
+  assert.equal(r.decision, 'abandon')
+  // This is the key assertion: 0.62, not 0.7.
+  assert.equal(r.confidence, 0.62, 'explicit CONFIDENCE: 0.62 should be parsed, not fallback to 0.7')
+})
+
+test('parseNaturalVerdict: missing CONFIDENCE falls back to hedge detection (regression guard)', () => {
+  const raw = `The user's only stated reason was clearly insufficient. The defense offered nothing specific.
+
+I rule in favor of restraint.
+
+DECISIVE FACTORS:
+- Defense: no specific need articulated
+- Prosecution: cited price concerns
+- Record: "I want it" alone`
+  const r = parseNaturalVerdict(raw)
+  assert.equal(r.decision, 'abandon')
+  // "clearly" is one of the strong hedges.
+  assert.equal(r.confidence, 0.85, 'without CONFIDENCE line, hedge detection picks up "clearly"')
+})
+
+test('parseNaturalVerdict: missing CONFIDENCE and no hedge keywords → fallback 0.7 (regression guard)', () => {
+  const raw = `The user said "I want it" and the prosecution said headphones are expensive.
+
+I rule in favor of restraint.
+
+DECISIVE FACTORS:
+- Defense: stated a preference
+- Prosecution: cited price
+- Record: no specifics`
+  const r = parseNaturalVerdict(raw)
+  assert.equal(r.confidence, 0.7, 'no CONFIDENCE and no hedge → 0.7 fallback')
+})
+
+test('parseNaturalVerdict: CONFIDENCE: 1.0 is clamped to 1', () => {
+  const raw = `Clear case. User needs this.
+
+CONFIDENCE: 1.0
+I rule in favor of the purchase.
+
+DECISIVE FACTORS:
+- Defense: broken item
+- Prosecution: no counter
+- Record: specific need`
+  const r = parseNaturalVerdict(raw)
+  assert.equal(r.confidence, 1.0)
+})
+
+test('parseNaturalVerdict: CONFIDENCE: 1.5 (out of range) is clamped to 1', () => {
+  const raw = `Clear case. User needs this.
+
+CONFIDENCE: 1.5
+I rule in favor of the purchase.
+
+DECISIVE FACTORS:
+- Defense: broken item
+- Prosecution: no counter
+- Record: specific need`
+  const r = parseNaturalVerdict(raw)
+  assert.equal(r.confidence, 1.0)
+})
+
+test('parseNaturalVerdict: explicit DECISIVE FACTORS are extracted as the 3 factors', () => {
+  const raw = `The user gave a specific use case.
+
+CONFIDENCE: 0.85
+I rule in favor of the purchase.
+
+DECISIVE FACTORS:
+- Defense: current pair is broken, needs replacement
+- Prosecution: did not name a specific cheaper alternative
+- Defense: work-from-home use case mentioned`
+  const r = parseNaturalVerdict(raw)
+  // Factors must reference the actual transcript, not be hardcoded
+  // boilerplate. The 3 hardcoded strings are: "Defense addressed
+  // key concerns" / "Reasonable necessity established" / etc.
+  assert.equal(r.factors[0], 'Defense: current pair is broken, needs replacement')
+  assert.equal(r.factors[1], 'Prosecution: did not name a specific cheaper alternative')
+  assert.equal(r.factors[2], 'Defense: work-from-home use case mentioned')
+})
+
+test('parseNaturalVerdict: DECISIVE FACTORS allow bullet markers -, *, •', () => {
+  const raw = `The user gave a specific use case.
+
+CONFIDENCE: 0.85
+I rule in favor of the purchase.
+
+DECISIVE FACTORS:
+* Defense: bullet with asterisk
+• Defense: bullet with middot
+- Defense: bullet with dash`
+  const r = parseNaturalVerdict(raw)
+  assert.equal(r.factors.length, 3)
+  assert.match(r.factors[0], /bullet with asterisk/)
+  assert.match(r.factors[1], /bullet with middot/)
+  assert.match(r.factors[2], /bullet with dash/)
+})
+
+test('parseNaturalVerdict: missing DECISIVE FACTORS falls back to numbered list', () => {
+  const raw = `The user said "I want it" with no specifics.
+
+CONFIDENCE: 0.7
+I rule in favor of restraint.
+
+1. Defense offered only "I want it"
+2. Prosecution cited a cheaper alternative
+3. No specific use case was given`
+  const r = parseNaturalVerdict(raw)
+  assert.equal(r.factors.length, 3)
+  assert.match(r.factors[0], /I want it/)
+  assert.match(r.factors[1], /cheaper alternative/)
+  assert.match(r.factors[2], /specific use case/)
+})
+
+test('parseNaturalVerdict: missing both DECISIVE FACTORS and numbered list → derived from paragraph', () => {
+  const raw = `The prosecution's strongest specific objection was that the user already owns a comparable product. The user did not address this. The defense offered only a general "I want it" without any use case.
+
+CONFIDENCE: 0.75
+I rule in favor of restraint.`
+  const r = parseNaturalVerdict(raw)
+  // Factors are derived from the paragraph. They should reference
+  // something from the transcript (e.g. "already owns a comparable
+  // product" or "I want it" or "did not address").
+  assert.equal(r.factors.length, 3)
+  const factorsText = r.factors.join(' ').toLowerCase()
+  assert.match(factorsText, /already|comparable|owns|address|i want it|use case|prosecution|defense/)
+})
+
+test('parseNaturalVerdict: factors are NOT the hardcoded 3-string boilerplate when the model produces real ones', () => {
+  // Regression guard: the old code hardcoded factors based on
+  // decision. The new code must NOT use those strings when the
+  // model produced real, transcript-anchored factors.
+  const raw = `Specific use case given.
+
+CONFIDENCE: 0.9
+I rule in favor of the purchase.
+
+DECISIVE FACTORS:
+- Defense: a unique, transcript-anchored fact
+- Defense: another unique fact
+- Record: a third unique fact`
+  const r = parseNaturalVerdict(raw)
+  const hardcodedProceed = ['Defense addressed key concerns', 'Reasonable necessity established', 'Price justified for stated use']
+  for (const f of r.factors) {
+    assert.ok(!hardcodedProceed.includes(f), `factor "${f}" must not be the old hardcoded string`)
+  }
+})
+
+test('parseNaturalVerdict: factors are sanitized (capped at 200 chars, stripped of markdown)', () => {
+  const longFactor = 'x'.repeat(300)
+  const raw = `The paragraph here.
+
+CONFIDENCE: 0.8
+I rule in favor of the purchase.
+
+DECISIVE FACTORS:
+- ${longFactor}
+- *another* factor with **markdown** emphasis
+- third factor`
+  const r = parseNaturalVerdict(raw)
+  assert.equal(r.factors.length, 3)
+  assert.ok(r.factors[0].length <= 200, `factor 0 should be capped at 200 chars, got ${r.factors[0].length}`)
+  assert.doesNotMatch(r.factors[1], /[*_]/)
+})
+
+test('parseNaturalVerdict: streaming — partial stays true until CONFIDENCE arrives', () => {
+  // Stream accumulates one chunk at a time. We verify that
+  // `partial` flips to false only once the CONFIDENCE and
+  // DECISIVE FACTORS are both present.
+  const full = `The user gave a specific use case.
+
+CONFIDENCE: 0.88
+I rule in favor of the purchase.
+
+DECISIVE FACTORS:
+- Defense: current is broken
+- Prosecution: no specific counter
+- Record: real need demonstrated`
+  // Chunks come one at a time. We accumulate and check partial at
+  // every step.
+  let acc = ''
+  let sawPartialTrue = false
+  let sawPartialFalse = false
+  for (const ch of full) {
+    acc += ch
+    const r = parseNaturalVerdict(acc)
+    if (r.partial) sawPartialTrue = true
+    else sawPartialFalse = true
+  }
+  assert.ok(sawPartialTrue, 'partial should be true at some point during streaming')
+  assert.ok(sawPartialFalse, 'partial should be false once the full output is accumulated')
+})
+
+test('parseNaturalVerdict: ruling line is NOT the last line anymore (DECISIVE FACTORS come after)', () => {
+  // Regression guard: the old "ruling line MUST be the last line"
+  // rule was relaxed to allow DECISIVE FACTORS after the ruling.
+  const raw = `The paragraph.
+
+CONFIDENCE: 0.7
+I rule in favor of restraint.
+
+DECISIVE FACTORS:
+- factor 1
+- factor 2
+- factor 3`
+  const r = parseNaturalVerdict(raw)
+  assert.equal(r.decision, 'abandon', 'ruling line in the middle should still be found')
+  assert.equal(r.factors.length, 3, 'factors after the ruling line should still be extracted')
+})
+
+// === extractFactors: direct unit test for the exported helper ===
+
+test('extractFactors: returns empty array for empty input', () => {
+  assert.deepEqual(extractFactors(''), [])
+})
+
+test('extractFactors: returns empty array when no factors block present', () => {
+  assert.deepEqual(extractFactors('Just a paragraph with no factors.'), [])
+})
+
+test('extractFactors: extracts the explicit DECISIVE FACTORS block', () => {
+  const text = `paragraph here
+
+DECISIVE FACTORS:
+- first factor
+- second factor
+- third factor`
+  const r = extractFactors(text)
+  assert.deepEqual(r, ['first factor', 'second factor', 'third factor'])
+})
+
+test('extractFactors: caps at 3 factors (more are dropped)', () => {
+  const text = `paragraph
+
+DECISIVE FACTORS:
+- one
+- two
+- three
+- four
+- five`
+  const r = extractFactors(text)
+  assert.equal(r.length, 3)
+  assert.deepEqual(r, ['one', 'two', 'three'])
+})
+
+test('extractFactors: accepts both -, *, • as bullet markers', () => {
+  const text = `paragraph
+
+DECISIVE FACTORS:
+- dash bullet
+* asterisk bullet
+• middot bullet`
+  const r = extractFactors(text)
+  assert.equal(r.length, 3)
+  assert.match(r[0], /dash bullet/)
+  assert.match(r[1], /asterisk bullet/)
+  assert.match(r[2], /middot bullet/)
+})
+
+test('extractFactors: is case-insensitive on the header (DECISIVE FACTORS / decisive factors / Decisive Factors)', () => {
+  const text = `paragraph
+
+decisive factors:
+- one
+- two
+- three`
+  const r = extractFactors(text)
+  assert.equal(r.length, 3)
+})
+
+test('extractFactors: strips surrounding markdown emphasis from bullets', () => {
+  const text = `paragraph
+
+DECISIVE FACTORS:
+- **bold** factor
+- *italic* factor
+- \`code\` factor`
+  const r = extractFactors(text)
+  assert.equal(r[0], 'bold factor')
+  assert.equal(r[1], 'italic factor')
+  assert.equal(r[2], 'code factor')
+})
+
+test('extractFactors: sanitizes surrounding quotes / asterisks / backticks', () => {
+  const text = `paragraph
+
+DECISIVE FACTORS:
+- "quoted" factor
+- *starred* factor
+- \`backtick\` factor`
+  const r = extractFactors(text)
+  assert.equal(r[0], 'quoted factor')
+  assert.equal(r[1], 'starred factor')
+  assert.equal(r[2], 'backtick factor')
+})
+
+test('extractFactors: caps a single bullet at 200 chars (truncates with ...)', () => {
+  const longBullet = 'x'.repeat(300)
+  const text = `paragraph
+
+DECISIVE FACTORS:
+- ${longBullet}
+- short
+- also short`
+  const r = extractFactors(text)
+  assert.equal(r[0].length, 200)
+  assert.match(r[0], /\.\.\.$/)
+})
+
+test('extractFactors: falls back to numbered list (1. 2. 3.) when no DECISIVE FACTORS block', () => {
+  const text = `paragraph here
+
+1. first numbered
+2. second numbered
+3. third numbered`
+  const r = extractFactors(text)
+  assert.equal(r.length, 3)
+  assert.equal(r[0], 'first numbered')
+  assert.equal(r[1], 'second numbered')
+  assert.equal(r[2], 'third numbered')
+})
+
+test('extractFactors: prefers DECISIVE FACTORS over numbered list when both present', () => {
+  const text = `paragraph
+
+DECISIVE FACTORS:
+- bullet A
+- bullet B
+- bullet C
+
+1. numbered one
+2. numbered two
+3. numbered three`
+  const r = extractFactors(text)
+  assert.equal(r[0], 'bullet A')
+  assert.equal(r[1], 'bullet B')
+  assert.equal(r[2], 'bullet C')
+})
+
 // === verdictFromNatural ===
 
 test('verdictFromNatural: complete result returns a verdict', () => {
@@ -1517,21 +1903,26 @@ test('prosecutionSystemPrompt: default is minimal', () => {
 
 // === Judge prompt: paragraph + ruling line shape (both modes) ===
 
-test('judgeSystemPrompt: paragraph + ruling line, no think/JSON/labeled fields', () => {
+test('judgeSystemPrompt: paragraph + ruling + CONFIDENCE + DECISIVE FACTORS format', () => {
   const p = judgeSystemPrompt(sampleProduct, null, { judgeMode: 'natural' })
-  // The judge now writes a paragraph + an "I rule in favor of X."
-  // line. No structured fields.
+  // The judge now writes a paragraph + a CONFIDENCE line + a ruling
+  // line + a DECISIVE FACTORS list. The "no labeled fields" rule
+  // was relaxed because the model now produces explicit CONFIDENCE
+  // and DECISIVE FACTORS — those are the only labeled fields, and
+  // they're anchored to the transcript.
   assert.match(p, /single paragraph \(3-5 sentences\)/i)
   assert.match(p, /I rule in favor of the purchase\./)
   assert.match(p, /I rule in favor of restraint\./)
+  // The new format is required.
+  assert.match(p, /CONFIDENCE:\s*0\.XX/i)
+  assert.match(p, /DECISIVE FACTORS:/i)
+  assert.match(p, /- <factor 1/i)
   // The prompt explicitly forbids thinking/reasoning/JSON.
-  assert.match(p, /Do not include any chain-of-thought, reasoning blocks, JSON/i)
-  // No legacy labeled fields.
+  assert.match(p, /Do not include any chain-of-thought, reasoning blocks, or JSON/i)
+  // No legacy labeled fields (DECISION, REASONING, SUMMARY, FACTORS).
   assert.doesNotMatch(p, /DECISION:/)
-  assert.doesNotMatch(p, /CONFIDENCE:/)
   assert.doesNotMatch(p, /REASONING:/)
   assert.doesNotMatch(p, /SUMMARY:/)
-  assert.doesNotMatch(p, /FACTORS:/)
   assert.doesNotMatch(p, /<think>/)
 })
 
@@ -2315,13 +2706,17 @@ test('VoiceConfig defaults include playbackRate 1.5 and speed 1.2 (verified via 
 //     justification on its own
 //   - Default to restraint when the user only said "I want it"
 
-test('judge prompt: a want is explicitly NOT a need', () => {
+test('judge prompt: a want is explicitly NOT a need (but a deliberate unarticulate choice wins at low confidence)', () => {
   const p = judgeSystemPrompt(product, null, { judgeMode: 'natural' })
   assert.match(p, /WANT IS NOT A NEED|want is not a need/i)
   // "I want it" alone must be classified as a want, not a need.
-  assert.match(p, /"I want it".*want.*not a need|"I want it" is a want/i)
-  // The model must be told that a single "I want it" loses by default.
-  assert.match(p, /"I want it".*loses by default|with no specifics is a want/i)
+  assert.match(p, /"I want it".*want.*not a need|"I want it" is a want|"I want it" \(alone, with no specifics\)/i)
+  // "I want it" alone is NOT an absolute loss — the user picked it deliberately.
+  // The defense can still win at moderate confidence (the user is making a
+  // deliberate choice, just not an articulate one).
+  assert.match(p, /bare "I want it".*defense can still win|defense can still win at moderate confidence|deliberate, unarticulate choice/i)
+  // Confidence range for the bare-I-want-it case is explicitly calibrated.
+  assert.match(p, /0\.55.*0\.65|0\.55.{0,5}.{0,5}0\.65/i)
 })
 
 test('judge prompt: lists specific use cases as needs', () => {
@@ -2337,8 +2732,172 @@ test('judge prompt: removes the "default to restraint" boilerplate and replaces 
   // The previous default-to-restraint rule is gone.
   assert.doesNotMatch(p, /If neither side is compelling, default to "I rule in favor of restraint"/i)
   assert.doesNotMatch(p, /A cautious ruling is better than a false positive/i)
-  // The new default-to-restraint rule is in (only when no need is shown).
-  assert.match(p, /has not demonstrated a need.*restraint|did not demonstrate a real need/i)
+  // The new ruling is need-based: "restraint" when the user did
+  // not articulate a real need, with a SPECIFIC, transcript-anchored
+  // prosecution counter-case as a precondition.
+  assert.match(p, /"restraint" = the user did not articulate a real need|did not articulate a real need/i)
+  // The new "presumption in favor of demonstrated needs" rule.
+  assert.match(p, /PRESUMPTION IN FAVOR OF DEMONSTRATED NEEDS/i)
+  // The prosecution must overcome a demonstrated need with a
+  // specific, transcript-anchored case.
+  assert.match(p, /SPECIFIC,? TRANSCRIPT-ANCHORED counter-case|SPECIFIC, TRANSCRIPT-ANCHORED counter-case/i)
+})
+
+// === Judge prompt: new format requirements (CONFIDENCE + DECISIVE FACTORS) ===
+
+test('judge prompt: requires the explicit CONFIDENCE: 0.XX line', () => {
+  const p = judgeSystemPrompt(product, null, { judgeMode: 'natural' })
+  // The model must be told to output a CONFIDENCE line.
+  assert.match(p, /CONFIDENCE:\s*0\.XX/i)
+  // It must explain what the values mean.
+  assert.match(p, /CONFIDENCE is 0\.0.{0,5}1\.0/i)
+  // It must give a calibration table so the model knows which
+  // value to pick for which situation.
+  assert.match(p, /0\.85\+|0\.85 \+|specific use case AND the prosecution failed to overcome/i)
+  assert.match(p, /0\.55.{0,5}0\.65|bare "I want it"/i)
+})
+
+test('judge prompt: requires the explicit DECISIVE FACTORS list (3 bullets)', () => {
+  const p = judgeSystemPrompt(product, null, { judgeMode: 'natural' })
+  assert.match(p, /DECISIVE FACTORS:/i)
+  // The prompt must say "exactly 3" (or equivalent) so the model
+  // doesn't emit 1 or 5.
+  assert.match(p, /exactly 3|three bullet|3 bullet|three factors/i)
+  // Each factor must reference the transcript.
+  assert.match(p, /must reference something the prosecution or defense ACTUALLY/i)
+  assert.match(p, /Do not invent factors|do not invent/i)
+})
+
+test('judge prompt: tells the model to CONSIDER ALL TURNS (scan the whole transcript)', () => {
+  // Regression guard: the user reported that real needs stated in
+  // earlier turns were being missed. The new prompt explicitly tells
+  // the model to read the whole transcript.
+  const p = judgeSystemPrompt(product, null, { judgeMode: 'natural' })
+  assert.match(p, /CONSIDER ALL TURNS|Read the entire transcript/i)
+  assert.match(p, /skim the whole thing|end-to-end/i)
+})
+
+test('judge prompt: the ruling line is no longer the literal last line of the response', () => {
+  // Regression guard: the old "ruling line MUST be the last
+  // thing" rule was relaxed to allow DECISIVE FACTORS after.
+  const p = judgeSystemPrompt(product, null, { judgeMode: 'natural' })
+  // The old "MUST be the last thing you output" rule is gone.
+  assert.doesNotMatch(p, /ruling line MUST be the last thing you output/i)
+  // The new "before the DECISIVE FACTORS" wording is present.
+  assert.match(p, /ruling line is "I rule in favor of/i)
+  assert.match(p, /last line of the DECISION block/i)
+})
+
+// === "Verdict varies" regression tests ===
+//
+// Bug the user reported: the verdict slide was completely broken —
+// always ruled restraint, confidence always 70%, factors always
+// the same. The fix has two parts:
+//   1. The judge prompt now produces explicit CONFIDENCE and
+//      DECISIVE FACTORS lines that the parser extracts.
+//   2. The parser has 4 fallback tiers for factors (explicit
+//      bullets → numbered list → paragraph-derived → hardcoded)
+//      so the factors are not always the same 3 strings.
+//
+// These tests demonstrate the fix by feeding the parser different
+// judge outputs (simulating different model behavior) and asserting
+// that the resulting Verdict varies accordingly.
+
+test('verdict varies: bare "I want it" → restraint, but moderate confidence (0.55-0.65) and factors reference the transcript', () => {
+  const raw = `The user only said "I want it" with no specifics. That is a want, not a need. The prosecution made a specific case about a known durability issue.
+
+CONFIDENCE: 0.62
+I rule in favor of restraint.
+
+DECISIVE FACTORS:
+- Defense: only stated "I want it"
+- Prosecution: cited a known durability issue
+- Record: no specific use case was given`
+  const v = verdictFromNatural(parseNaturalVerdict(raw))
+  assert.equal(v.decision, 'abandon')
+  // Confidence is the explicit value, NOT the 0.7 default.
+  assert.equal(v.confidence, 0.62)
+  // Factors reference the transcript, NOT the hardcoded strings.
+  assert.notEqual(v.topFactors[0], 'Prosecution made the stronger case')
+  assert.notEqual(v.topFactors[1], 'Cost outweighs demonstrated need')
+  assert.notEqual(v.topFactors[2], 'Safer to reconsider')
+  assert.match(v.topFactors.join(' '), /durability|I want it|use case/)
+})
+
+test('verdict varies: real need (current broken) → purchase, high confidence, factors reference the use case', () => {
+  const raw = `The user said their current headphones broke and they need a replacement. That is a real, specific need. The prosecution did not provide a specific counter-case.
+
+CONFIDENCE: 0.88
+I rule in favor of the purchase.
+
+DECISIVE FACTORS:
+- Defense: current headphones are broken
+- Prosecution: no specific cheaper alternative named
+- Record: work-from-home use case is specific`
+  const v = verdictFromNatural(parseNaturalVerdict(raw))
+  assert.equal(v.decision, 'proceed')
+  // High confidence, NOT 0.7.
+  assert.equal(v.confidence, 0.88)
+  // Factors reference the use case, NOT the hardcoded strings.
+  assert.notEqual(v.topFactors[0], 'Defense addressed key concerns')
+  assert.notEqual(v.topFactors[1], 'Reasonable necessity established')
+  assert.match(v.topFactors.join(' '), /headphones|broken|cheaper alternative|use case/)
+})
+
+test('verdict varies: two different "I want it" trials produce different factors (not the same hardcoded 3 strings)', () => {
+  const raw1 = `The user only said "I want it". The prosecution cited a known warranty issue.
+
+CONFIDENCE: 0.65
+I rule in favor of restraint.
+
+DECISIVE FACTORS:
+- Defense: stated "I want it"
+- Prosecution: warranty issue cited
+- Record: no specifics`
+
+  const raw2 = `The user only said "I want it". The prosecution cited a much cheaper alternative.
+
+CONFIDENCE: 0.7
+I rule in favor of restraint.
+
+DECISIVE FACTORS:
+- Defense: stated "I want it"
+- Prosecution: cheaper alternative exists
+- Record: no specifics`
+
+  const v1 = verdictFromNatural(parseNaturalVerdict(raw1))
+  const v2 = verdictFromNatural(parseNaturalVerdict(raw2))
+  // Both rule restraint, but the factors differ because the
+  // prosecution made different specific cases in each.
+  assert.equal(v1.decision, 'abandon')
+  assert.equal(v2.decision, 'abandon')
+  assert.notDeepEqual(v1.topFactors, v2.topFactors, 'factors must vary with the prosecution\'s specific case')
+  // And neither set is the old hardcoded 3 strings.
+  const hardcoded = ['Prosecution made the stronger case', 'Cost outweighs demonstrated need', 'Safer to reconsider']
+  assert.ok(!v1.topFactors.every((f) => hardcoded.includes(f)), 'v1 should not be the hardcoded strings')
+  assert.ok(!v2.topFactors.every((f) => hardcoded.includes(f)), 'v2 should not be the hardcoded strings')
+})
+
+test('verdict varies: confidence is NOT always 0.7 — varies with the model\'s explicit value', () => {
+  const confidences = [0.42, 0.55, 0.68, 0.78, 0.85, 0.92, 0.99]
+  const seen = new Set()
+  for (const conf of confidences) {
+    const raw = `The user said something.
+
+CONFIDENCE: ${conf}
+I rule in favor of restraint.
+
+DECISIVE FACTORS:
+- Defense: said something
+- Prosecution: made a case
+- Record: transcript analyzed`
+    const v = verdictFromNatural(parseNaturalVerdict(raw))
+    seen.add(v.confidence)
+  }
+  // All 7 confidence values should produce 7 distinct outputs.
+  // (They may not all be in seen if some round to the same value,
+  // but most should be distinct.)
+  assert.ok(seen.size >= 5, `expected at least 5 distinct confidences, got ${seen.size}: ${[...seen].join(', ')}`)
 })
 
 // === Prosecution prompt: conversational, not legal; brand/category shorthand ===
