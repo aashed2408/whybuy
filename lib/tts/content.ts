@@ -97,6 +97,7 @@ class TtsManager {
     this.enabled = true
     this.playback.setMuted(this.config.muted)
     this.playback.setVolume(this.config.volume)
+    this.playback.setPlaybackRate(this.config.playbackRate)
     this.playback.start()
     return true
   }
@@ -111,6 +112,7 @@ class TtsManager {
     if (this.config) {
       this.playback.setMuted(this.config.muted)
       this.playback.setVolume(this.config.volume)
+      this.playback.setPlaybackRate(this.config.playbackRate)
     }
     return this.config
   }
@@ -137,6 +139,7 @@ class TtsManager {
     this.notify()
     if (sentence) this.playback.speak(sentence, ttsConfigFromVoice(config))
   }
+  // (refreshConfig already calls setPlaybackRate below)
 
   /**
    * Flush any buffered partial sentence. Call on stream end.
@@ -252,5 +255,13 @@ function ttsConfigFromVoice(c: VoiceConfig) {
     modelId: c.modelId,
     stability: c.stability,
     similarityBoost: c.similarityBoost,
+    // playbackRate is read by TtsPlayback.speak() and applied to the
+    // AudioBufferSourceNode. We also set it on the manager so it
+    // takes effect even if the next speak() call comes before the
+    // Options page sync.
+    playbackRate: c.playbackRate,
+    // Native ElevenLabs speed is passed through to the request body
+    // so the model regenerates the audio faster (no pitch shift).
+    speed: c.speed,
   }
 }

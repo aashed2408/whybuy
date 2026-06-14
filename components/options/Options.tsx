@@ -1479,6 +1479,24 @@ function VoiceSection({
         />
       </div>
 
+      <div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, letterSpacing: '0.2em', textTransform: 'uppercase', color: '#c9a14a', marginBottom: 6 }}>
+          <span>Voice speed</span>
+          <span>{voice.playbackRate.toFixed(2)}x</span>
+        </div>
+        <input
+          type="range"
+          min={50}
+          max={200}
+          value={Math.round(voice.playbackRate * 100)}
+          onChange={(e) => onChange({ ...voice, playbackRate: Number(e.target.value) / 100 })}
+          style={{ width: '100%', accentColor: '#c9a14a' }}
+        />
+        <div style={{ fontSize: 11, color: 'rgba(247,238,215,0.5)', marginTop: 4, lineHeight: 1.5 }}>
+          1.0x is normal speed. 1.5x (default) is faster — combines Web Audio playback rate with ElevenLabs native speed. Higher values sound chipmunk-y; 1.0–1.5x is the sweet spot.
+        </div>
+      </div>
+
       <div style={{ fontSize: 11, color: 'rgba(247,238,215,0.5)', lineHeight: 1.5 }}>
         Voice is rate-limited at ~10 requests/minute on the free ElevenLabs tier. Each sentence the AI speaks
         counts as one request, so a full trial typically uses 4–10 requests.

@@ -26,6 +26,12 @@ export interface TtsConfig {
   modelId?: string
   stability?: number
   similarityBoost?: number
+  /**
+   * Playback rate for the decoded audio. 1 = normal speed.
+   * 1.5 = 50% faster (slight chipmunk effect, but acceptable for
+   * a casual debate). Defaults to 1.5 if not provided.
+   */
+  playbackRate?: number
 }
 
 export type TtsState = 'idle' | 'fetching' | 'decoding' | 'playing' | 'error'
@@ -56,6 +62,8 @@ export class TtsPlayback {
   private currentSource: AudioBufferSourceNode | null = null
   private muted = false
   private volume = 1
+  /** Playback rate (1 = normal). 1.5 default = "waste less time". */
+  private playbackRate = 1.5
   private listener: TtsListener = {}
   /** In-flight fetch aborters — aborted by `interrupt()`. */
   private inflight = new Set<AbortController>()
@@ -114,6 +122,22 @@ export class TtsPlayback {
     return this.volume
   }
 
+  /**
+   * Set the playback rate (1 = normal, 1.5 = 50% faster, 0.5 = half
+   * speed). Default is 1.5 — the user wanted the TTS to "waste less
+   * time". The voice gets a bit chipmunk-y at higher rates, but at
+   * 1.5 it's still intelligible and sounds like a fast-talking
+   * friend rather than a playback error.
+   */
+  setPlaybackRate(r: number) {
+    if (!Number.isFinite(r) || r <= 0) return
+    this.playbackRate = r
+  }
+
+  getPlaybackRate(): number {
+    return this.playbackRate
+  }
+
   getLastError(): string | null {
     return this.lastError
   }
@@ -127,6 +151,11 @@ export class TtsPlayback {
    */
   speak(text: string, config: TtsConfig): void {
     if (!text || !text.trim()) return
+    // If the caller passed an explicit playbackRate, apply it to
+    // the global rate so the next audio plays at the new speed.
+    if (typeof config.playbackRate === 'number' && config.playbackRate > 0) {
+      this.playbackRate = config.playbackRate
+    }
     const item: QueuedItem = { text: text.trim(), config }
     this.queue.push({ item, buf: this.fetchAndDecode(item) })
     void this.drain()
@@ -270,6 +299,14 @@ export class TtsPlayback {
       }
       const src = this.ctx.createBufferSource()
       src.buffer = buf
+      // Apply the playback rate. 1.5x is the default — the user wanted
+      // the TTS to be faster ("waste less time"). 1.5x has a mild
+      // pitch-up but is still clearly intelligible; combined with
+      // ElevenLabs' native 1.2x speed setting, that's a 1.8x
+      // effective speed with no pitch distortion from the model.
+      try {
+        src.playbackRate.value = this.playbackRate
+      } catch {}
       src.connect(this.gain)
       this.currentSource = src
       let settled = false

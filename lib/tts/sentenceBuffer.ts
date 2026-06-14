@@ -50,7 +50,10 @@ export class SentenceBuffer {
   private lastChunk = ''
 
   constructor(opts: { maxBufferChars?: number } = {}) {
-    this.maxBuffer = opts.maxBufferChars ?? 200
+    // 120 chars = roughly one full sentence from the prosecution.
+    // Lowered from 200 so the first TTS request goes out sooner —
+    // the user said the TTS was wasting time.
+    this.maxBuffer = opts.maxBufferChars ?? 120
   }
 
   /**

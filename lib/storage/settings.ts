@@ -22,6 +22,20 @@ export interface VoiceConfig {
   muted: boolean
   /** Volume 0..1. Default 1. */
   volume: number
+  /**
+   * AudioBufferSourceNode playback rate. 1 = normal speed.
+   * Default 1.5 = 50% faster so the trial "wastes less time".
+   * Slight chipmunk effect, but acceptable for a casual debate.
+   * Range 0.5..2.0.
+   */
+  playbackRate: number
+  /**
+   * Native ElevenLabs speaking rate (0.5..1.2 for turbo v2.5).
+   * Default 1.2 (max for the model) so the model regenerates audio
+   * 20% faster without pitch distortion. Combined with playbackRate
+   * this gives ~1.8x effective speed.
+   */
+  speed: number
   /** Voice settings — see elevenLabs.ts. */
   stability: number
   similarityBoost: number
@@ -63,6 +77,11 @@ const DEFAULT_VOICE: VoiceConfig = {
   modelId: DEFAULT_MODEL_ID,
   muted: false,
   volume: 1,
+  // The user wanted faster TTS so the trial "wastes less time".
+  // 1.5x Web Audio playback (slight pitch up) + 1.2x ElevenLabs
+  // native speed (no pitch distortion) ≈ 1.8x effective speed.
+  playbackRate: 1.5,
+  speed: 1.2,
   stability: 0.5,
   similarityBoost: 0.75,
 }
@@ -124,6 +143,12 @@ export function normalizeVoice(raw: unknown): VoiceConfig | null {
     modelId: typeof o.modelId === 'string' && o.modelId.length > 0 ? o.modelId : DEFAULT_VOICE.modelId,
     muted: !!o.muted,
     volume: clamp01(typeof o.volume === 'number' ? o.volume : DEFAULT_VOICE.volume),
+    playbackRate: clampPlaybackRate(
+      typeof o.playbackRate === 'number' ? o.playbackRate : DEFAULT_VOICE.playbackRate,
+    ),
+    speed: clampSpeed(
+      typeof o.speed === 'number' ? o.speed : DEFAULT_VOICE.speed,
+    ),
     stability: clamp01(typeof o.stability === 'number' ? o.stability : DEFAULT_VOICE.stability),
     similarityBoost: clamp01(
       typeof o.similarityBoost === 'number' ? o.similarityBoost : DEFAULT_VOICE.similarityBoost,
@@ -139,5 +164,19 @@ function clamp01(n: number): number {
   if (!Number.isFinite(n)) return DEFAULT_VOICE.volume
   if (n < 0) return 0
   if (n > 1) return 1
+  return n
+}
+
+function clampPlaybackRate(n: number): number {
+  if (!Number.isFinite(n) || n <= 0) return DEFAULT_VOICE.playbackRate
+  if (n < 0.5) return 0.5
+  if (n > 2) return 2
+  return n
+}
+
+function clampSpeed(n: number): number {
+  if (!Number.isFinite(n) || n <= 0) return DEFAULT_VOICE.speed
+  if (n < 0.5) return 0.5
+  if (n > 1.2) return 1.2
   return n
 }
