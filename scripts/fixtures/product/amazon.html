@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Anker USB-C Hub, 7-in-1 Adapter with 4K HDMI - Amazon.com</title>
+  <meta property="og:title" content="Anker USB-C Hub, 7-in-1 Adapter with 4K HDMI" />
+  <meta property="og:image" content="https://example.com/no-image.jpg" />
+  <!--
+    Fixture for the Amazon product page extractor. Shaped like a real
+    Amazon product detail page (the Anker USB-C Hub) with:
+      - #productTitle: the product name
+      - #bylineInfo: the brand byline ("Visit the Anker Store")
+      - .a-price .a-offscreen: the current price ($35.99)
+      - #acrPopover: the rating popover (4.7 out of 5)
+      - #acrCustomerReviewText: the review count ("12,453 ratings")
+      - A "Proceed to buy" button so the click-interceptor can be
+        exercised end-to-end. The existing CHECKOUT_RE includes the
+        word "checkout" on its own, so the fixture's "Proceed to
+        checkout" matches.
+
+    The extractor must return:
+      - name: "Anker USB-C Hub, 7-in-1 Adapter with 4K HDMI"
+      - brand: "Anker"  (parsed from the byline)
+      - price: 35.99
+      - rating: 4.7
+      - reviewCount: 12453
+      - currency: USD
+  -->
+</head>
+<body>
+  <h1>Anker USB-C Hub, 7-in-1 Adapter with 4K HDMI</h1>
+
+  <div id="bylineInfo" class="a-section a-spacing-small">
+    <span class="a-link-normal">Visit the Anker Store</span>
+  </div>
+
+  <div id="titleSection" class="a-section a-spacing-none">
+    <h1 id="productTitle" class="a-size-large product-title-word-break">
+      Anker USB-C Hub, 7-in-1 Adapter with 4K HDMI
+    </h1>
+  </div>
+
+  <div id="averageCustomerReviews" class="a-spacing-none">
+    <i class="a-icon a-icon-star a-star-4-5">
+      <span class="a-icon-alt" aria-label="4.7 out of 5 stars">4.7 out of 5 stars</span>
+    </i>
+  </div>
+
+  <div id="acrPopover" title="4.7 out of 5 stars"></div>
+
+  <div id="acrCustomerReviewText" class="a-link-normal">
+    <a>12,453 ratings</a>
+  </div>
+
+  <div class="a-section a-spacing-none">
+    <span class="a-price aok-align-center">
+      <span class="a-offscreen">$35.99</span>
+      <span class="a-price-symbol">$</span><span class="a-price-whole">35</span>
+      <span class="a-price-fraction">99</span>
+    </span>
+  </div>
+
+  <div id="feature-bullets">
+    <ul>
+      <li><span>4K HDMI output</span></li>
+      <li><span>USB-C Power Delivery</span></li>
+    </ul>
+  </div>
+
+  <!-- Prime eligibility so the extractor picks it up. -->
+  <i class="a-icon-prime" aria-label="Prime"></i>
+  <span class="a-color-success">Prime eligible</span>
+
+  <!-- "Proceed to checkout" — the trigger regex is liberal enough to
+       match the literal word "checkout", so this single button
+       suffices. The trial opens with this single product. -->
+  <button type="button" class="a-button a-button-primary">
+    Proceed to checkout
+  </button>
+</body>
+</html>

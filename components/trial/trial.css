@@ -1,0 +1,721 @@
+/* WhyBuy trial overlay — scoped to the shadow root. */
+
+:host, * {
+  box-sizing: border-box;
+}
+
+:host {
+  all: initial;
+  font-family: 'Inter', system-ui, sans-serif;
+  color: #f7eed7;
+}
+
+#whybuy-trial-root {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background:
+    radial-gradient(120% 90% at 50% 0%, #3a1f12 0%, #1a0e08 55%, #120905 100%);
+  color: #f7eed7;
+}
+
+/* Wood paneling effect on the top bar */
+.whybuy-wood {
+  background:
+    repeating-linear-gradient(
+      180deg,
+      rgba(0,0,0,0.0) 0px,
+      rgba(0,0,0,0.0) 60px,
+      rgba(0,0,0,0.18) 60px,
+      rgba(0,0,0,0.18) 62px
+    ),
+    linear-gradient(180deg, #2a160d 0%, #1a0e08 100%);
+  border-bottom: 2px solid #c9a14a;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+}
+
+.whybuy-nameplate {
+  font-family: 'Cormorant Garamond', Georgia, serif;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #e6c578;
+  text-shadow: 0 1px 0 rgba(0,0,0,0.4);
+}
+
+.whybuy-card {
+  background: linear-gradient(180deg, rgba(247,238,215,0.04) 0%, rgba(247,238,215,0.02) 100%);
+  border: 1px solid rgba(201,161,74,0.35);
+  border-radius: 6px;
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.3), 0 4px 18px rgba(0,0,0,0.4);
+}
+
+.whybuy-panel-prosecution {
+  background:
+    radial-gradient(80% 60% at 50% 0%, rgba(138,28,43,0.12) 0%, transparent 60%),
+    linear-gradient(180deg, #1a0e08 0%, #22130c 100%);
+  border: 1px solid rgba(138,28,43,0.55);
+  border-radius: 8px;
+}
+
+.whybuy-panel-defense {
+  background:
+    radial-gradient(80% 60% at 50% 0%, rgba(28,79,122,0.18) 0%, transparent 60%),
+    linear-gradient(180deg, #1a0e08 0%, #22130c 100%);
+  border: 1px solid rgba(201,161,74,0.45);
+  border-radius: 8px;
+}
+
+.whybuy-panel-active {
+  box-shadow: 0 0 0 1px rgba(201,161,74,0.7), 0 0 32px rgba(201,161,74,0.18);
+}
+
+.whybuy-bubble {
+  font-family: 'Cormorant Garamond', Georgia, serif;
+  font-size: 19px;
+  line-height: 1.55;
+  color: #f7eed7;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.whybuy-bubble-streaming::after {
+  content: '▍';
+  display: inline-block;
+  margin-left: 2px;
+  animation: whybuy-blink 0.9s steps(1) infinite;
+  color: #e6c578;
+}
+
+.whybuy-thinking {
+  color: #c9a14a;
+  letter-spacing: 0.4em;
+  animation: whybuy-pulse-soft 1.4s ease-in-out infinite;
+}
+
+@keyframes whybuy-blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+
+@keyframes whybuy-pulse-soft {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
+.whybuy-gavel {
+  display: inline-block;
+  font-size: 28px;
+  filter: drop-shadow(0 2px 0 rgba(0,0,0,0.5));
+}
+
+.whybuy-verdict-card {
+  background:
+    radial-gradient(60% 50% at 50% 0%, rgba(201,161,74,0.18) 0%, transparent 70%),
+    linear-gradient(180deg, #22130c 0%, #120905 100%);
+  border: 2px solid #c9a14a;
+  border-radius: 10px;
+  box-shadow: 0 12px 60px rgba(0,0,0,0.6), inset 0 0 0 1px rgba(247,238,215,0.08);
+  padding: 36px 44px;
+  text-align: center;
+}
+
+.whybuy-gauge {
+  width: 220px;
+  height: 6px;
+  background: rgba(247,238,215,0.12);
+  border-radius: 3px;
+  margin: 14px auto 4px;
+  overflow: hidden;
+  position: relative;
+}
+
+.whybuy-gauge-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #c9a14a 0%, #e6c578 100%);
+  border-radius: 3px;
+  transition: width 600ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.whybuy-btn {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: 0.04em;
+  padding: 12px 22px;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid #c9a14a;
+  background: linear-gradient(180deg, #d6b463 0%, #c9a14a 100%);
+  color: #1a0e08;
+  box-shadow: 0 2px 0 rgba(0,0,0,0.4), 0 6px 18px rgba(0,0,0,0.35);
+  transition: transform 120ms ease, box-shadow 120ms ease, filter 120ms ease;
+}
+
+.whybuy-btn:hover { filter: brightness(1.06); transform: translateY(-1px); }
+.whybuy-btn:active { transform: translateY(0); filter: brightness(0.96); }
+.whybuy-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.whybuy-btn-ghost {
+  background: transparent;
+  color: #e6c578;
+  border: 1px solid rgba(201,161,74,0.5);
+  box-shadow: none;
+}
+.whybuy-btn-ghost:hover { background: rgba(201,161,74,0.08); }
+
+.whybuy-composer {
+  width: 100%;
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+  padding: 14px;
+  background: rgba(0,0,0,0.35);
+  border-top: 1px solid rgba(201,161,74,0.3);
+}
+
+.whybuy-textarea {
+  flex: 1;
+  resize: none;
+  min-height: 56px;
+  max-height: 180px;
+  background: rgba(247,238,215,0.05);
+  color: #f7eed7;
+  border: 1px solid rgba(201,161,74,0.35);
+  border-radius: 6px;
+  padding: 12px 14px;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+  outline: none;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.whybuy-textarea:focus {
+  border-color: #c9a14a;
+  box-shadow: 0 0 0 3px rgba(201,161,74,0.15);
+}
+
+.whybuy-textarea::placeholder { color: rgba(247,238,215,0.4); }
+
+.whybuy-loss {
+  background:
+    radial-gradient(70% 60% at 50% 30%, rgba(138,28,43,0.4) 0%, transparent 60%),
+    linear-gradient(180deg, #1a0e08 0%, #120905 100%);
+}
+
+.whybuy-bench {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 0 4px;
+  position: relative;
+}
+
+.whybuy-scales {
+  width: 56px;
+  height: 56px;
+  position: relative;
+  display: inline-block;
+}
+
+.whybuy-scales svg { width: 100%; height: 100%; }
+
+.whybuy-scales-tilt-left { animation: whybuy-tilt-l 600ms ease-in-out; }
+.whybuy-scales-tilt-right { animation: whybuy-tilt-r 600ms ease-in-out; }
+.whybuy-scales-centered { animation: whybuy-tilt-c 500ms ease-in-out; }
+
+@keyframes whybuy-tilt-l {
+  0%   { transform: rotate(0deg); }
+  50%  { transform: rotate(-15deg); }
+  100% { transform: rotate(0deg); }
+}
+@keyframes whybuy-tilt-r {
+  0%   { transform: rotate(0deg); }
+  50%  { transform: rotate(15deg); }
+  100% { transform: rotate(0deg); }
+}
+@keyframes whybuy-tilt-c {
+  0%   { transform: scale(0.9) rotate(0deg); }
+  60%  { transform: scale(1.05) rotate(0deg); }
+  100% { transform: scale(1) rotate(0deg); }
+}
+
+.whybuy-typing-dots::after {
+  content: '...';
+  display: inline-block;
+  width: 1.2em;
+  text-align: left;
+  animation: whybuy-dots 1.2s steps(4, end) infinite;
+  color: #e6c578;
+}
+@keyframes whybuy-dots {
+  0%   { content: ''; }
+  25%  { content: '.'; }
+  50%  { content: '..'; }
+  75%, 100% { content: '...'; }
+}
+
+.whybuy-confetti-proceed {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(2px 2px at 20% 30%, #e6c578 0%, transparent 60%),
+    radial-gradient(2px 2px at 70% 40%, #c9a14a 0%, transparent 60%),
+    radial-gradient(2px 2px at 40% 70%, #f0d99c 0%, transparent 60%),
+    radial-gradient(2px 2px at 85% 80%, #c9a14a 0%, transparent 60%);
+  opacity: 0.7;
+  animation: whybuy-fade-out 1.2s ease-out forwards;
+}
+@keyframes whybuy-fade-out {
+  to { opacity: 0; }
+}
+
+.whybuy-round-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  background: rgba(201,161,74,0.12);
+  border: 1px solid rgba(201,161,74,0.35);
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #e6c578;
+}
+
+.whybuy-divider {
+  height: 1px;
+  background: linear-gradient(90deg, transparent 0%, rgba(201,161,74,0.4) 50%, transparent 100%);
+}
+
+.whybuy-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(201,161,74,0.4) transparent;
+}
+.whybuy-scroll::-webkit-scrollbar { width: 6px; }
+.whybuy-scroll::-webkit-scrollbar-thumb { background: rgba(201,161,74,0.4); border-radius: 3px; }
+.whybuy-scroll::-webkit-scrollbar-track { background: transparent; }
+
+/* === Mini AI avatar (Claude-style mark) === */
+
+.whybuy-claude-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  flex-shrink: 0;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.55));
+  transition: transform 200ms ease;
+}
+
+.whybuy-claude-avatar.speaking {
+  animation: whybuy-claude-pulse 1.4s ease-in-out infinite;
+}
+
+.whybuy-claude-avatar .whybuy-claude-mouth-shape {
+  transform-origin: 32px 42px;
+  transform-box: fill-box;
+}
+
+.whybuy-claude-avatar.speaking .whybuy-claude-mouth-shape {
+  animation: whybuy-claude-talk 0.22s steps(1) infinite;
+}
+
+@keyframes whybuy-claude-pulse {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.06); }
+}
+
+@keyframes whybuy-claude-talk {
+  0%   { transform: scaleY(0.4); }
+  35%  { transform: scaleY(1); }
+  70%  { transform: scaleY(0.55); }
+  100% { transform: scaleY(0.9); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .whybuy-claude-avatar.speaking { animation: none; }
+  .whybuy-claude-avatar.speaking .whybuy-claude-mouth-shape { animation: none; }
+}
+
+/* Avatar inline next to a message bubble */
+.whybuy-bubble-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin-bottom: 14px;
+  animation: whybuy-fade-in 300ms ease-out;
+}
+.whybuy-bubble-row .whybuy-claude-avatar { margin-top: 4px; }
+.whybuy-bubble-row.defense { flex-direction: row-reverse; }
+
+/* === Judge Room === */
+
+.whybuy-judge-room {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  background:
+    radial-gradient(80% 60% at 50% 35%, rgba(201, 161, 74, 0.12) 0%, transparent 70%),
+    linear-gradient(180deg, #1a0e08 0%, #120905 100%);
+  overflow: hidden;
+}
+
+.whybuy-judge-room::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    repeating-linear-gradient(
+      180deg,
+      rgba(0, 0, 0, 0) 0px,
+      rgba(0, 0, 0, 0) 80px,
+      rgba(0, 0, 0, 0.18) 80px,
+      rgba(0, 0, 0, 0.18) 82px
+    );
+  pointer-events: none;
+  opacity: 0.6;
+}
+
+.whybuy-judge-spot {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  padding: 32px 48px;
+  z-index: 1;
+}
+
+.whybuy-judge-svg {
+  width: 180px;
+  height: 180px;
+  filter: drop-shadow(0 12px 28px rgba(0, 0, 0, 0.6));
+}
+
+.whybuy-judge-svg .whybuy-gavel-arm {
+  transform-origin: 96px 132px;
+  transform-box: fill-box;
+  transition: transform 700ms cubic-bezier(0.6, 0.05, 0.2, 1);
+}
+
+.whybuy-judge-room.strike .whybuy-gavel-arm {
+  transform: rotate(75deg);
+}
+
+.whybuy-judge-room.strike .whybuy-gavel-flash {
+  opacity: 0.55;
+}
+
+/* === ALL RISE sequence ===
+ * Animation timeline:
+ *   .all-rise on the room container is added the moment the verdict
+ *   arrives, and removed 1.2s later when .strike takes over.
+ *   The banner slides in, the bench rises (judge SVG + scales slide
+ *   up from below), then the room darkens before the gavel drops.
+ */
+.whybuy-all-rise-banner {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 28px 24px 32px;
+  background: linear-gradient(180deg, rgba(18, 9, 5, 0.96) 0%, rgba(18, 9, 5, 0.7) 70%, rgba(18, 9, 5, 0) 100%);
+  z-index: 3;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(-100%);
+  /* Default: hidden. Only animate in when the room has the .all-rise
+     class; only animate out when .strike. Stay hidden otherwise (so
+     the banner does not show during deliberation or after revealed). */
+}
+.whybuy-judge-room.all-rise .whybuy-all-rise-banner {
+  opacity: 1;
+  transform: translateY(0);
+  animation: whybuy-all-rise-in 700ms cubic-bezier(0.2, 0.7, 0.2, 1) forwards;
+}
+.whybuy-judge-room.strike .whybuy-all-rise-banner {
+  animation: whybuy-all-rise-out 350ms ease-in forwards;
+}
+.whybuy-all-rise-banner.is-revealed {
+  /* Keep the banner out of the way of the verdict card. */
+  opacity: 0;
+  transform: translateY(-40%);
+  transition: opacity 200ms ease-out, transform 200ms ease-out;
+  pointer-events: none;
+  animation: none;
+}
+
+.whybuy-all-rise-text {
+  font-family: 'Cormorant Garamond', Georgia, serif;
+  font-size: 44px;
+  font-weight: 700;
+  letter-spacing: 0.5em;
+  color: #e6c578;
+  text-transform: uppercase;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.8), 0 0 24px rgba(201, 161, 74, 0.4);
+}
+
+.whybuy-all-rise-sub {
+  font-family: 'Cormorant Garamond', Georgia, serif;
+  font-size: 13px;
+  letter-spacing: 0.25em;
+  text-transform: uppercase;
+  color: rgba(247, 238, 215, 0.6);
+  font-style: italic;
+}
+
+@keyframes whybuy-all-rise-in {
+  0%   { opacity: 0; transform: translateY(-100%); }
+  60%  { opacity: 1; transform: translateY(0); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+@keyframes whybuy-all-rise-out {
+  0%   { opacity: 1; transform: translateY(0); }
+  100% { opacity: 0; transform: translateY(-40%); }
+}
+
+/* Bench (judge SVG + nameplate) rises up from below during the
+   allRise phase. The original CSS positions .whybuy-judge-spot
+   centered; we offset it during all-rise so it appears to come in
+   from below the frame. */
+.whybuy-judge-room.all-rise .whybuy-judge-spot {
+  animation: whybuy-bench-rise 1100ms cubic-bezier(0.16, 0.84, 0.2, 1) forwards;
+}
+.whybuy-judge-room.strike .whybuy-judge-spot {
+  animation: none; /* let the strike phase own the motion */
+  transform: translateY(0);
+}
+
+@keyframes whybuy-bench-rise {
+  0%   { transform: translateY(110%); opacity: 0; }
+  40%  { opacity: 0.4; }
+  100% { transform: translateY(0); opacity: 1; }
+}
+
+/* Scales SVG bounces a touch when it lands. */
+.whybuy-judge-room.all-rise .whybuy-judge-svg {
+  animation: whybuy-scales-bounce 700ms cubic-bezier(0.34, 1.56, 0.64, 1) 900ms both;
+}
+@keyframes whybuy-scales-bounce {
+  0%   { transform: scale(0.6); }
+  60%  { transform: scale(1.15); }
+  100% { transform: scale(1); }
+}
+
+/* Subtle vignette that darkens the room during the rise/strike so the
+   bench feels spotlit. */
+.whybuy-bench-vignette {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(60% 50% at 50% 50%, transparent 0%, rgba(0, 0, 0, 0) 30%, rgba(0, 0, 0, 0.55) 100%);
+  opacity: 0;
+  transition: opacity 350ms ease-out;
+  z-index: 0;
+}
+.whybuy-judge-room.all-rise .whybuy-bench-vignette,
+.whybuy-judge-room.strike .whybuy-bench-vignette {
+  opacity: 1;
+}
+.whybuy-judge-room.revealed .whybuy-bench-vignette {
+  opacity: 0;
+  transition: opacity 600ms ease-out 200ms;
+}
+
+/* The gavel flash pulses twice during the strike phase for a more
+   "thump-thump" feel, and the judge mark gets a brief golden glow. */
+.whybuy-judge-room.strike .whybuy-gavel-flash {
+  animation: whybuy-gavel-pulse 600ms ease-out;
+}
+@keyframes whybuy-gavel-pulse {
+  0%   { opacity: 0; transform: translate(-50%, -50%) scale(0.4); }
+  20%  { opacity: 0.9; transform: translate(-50%, -50%) scale(1.2); }
+  40%  { opacity: 0.3; transform: translate(-50%, -50%) scale(1); }
+  60%  { opacity: 0.85; transform: translate(-50%, -50%) scale(1.05); }
+  100% { opacity: 0.55; transform: translate(-50%, -50%) scale(1); }
+}
+
+.whybuy-judge-room.strike .whybuy-judge-svg {
+  filter: drop-shadow(0 0 24px rgba(230, 197, 120, 0.7)) drop-shadow(0 12px 28px rgba(0, 0, 0, 0.6));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .whybuy-judge-room.all-rise .whybuy-judge-spot,
+  .whybuy-judge-room.all-rise .whybuy-judge-svg,
+  .whybuy-all-rise-banner,
+  .whybuy-judge-room.strike .whybuy-gavel-flash {
+    animation: none;
+  }
+  .whybuy-judge-room.all-rise .whybuy-judge-spot { transform: translateY(0); opacity: 1; }
+  .whybuy-all-rise-banner { transform: translateY(0); opacity: 1; }
+}
+
+.whybuy-gavel-flash {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 380px;
+  height: 380px;
+  transform: translate(-50%, -50%);
+  background: radial-gradient(circle, rgba(230, 197, 120, 0.7) 0%, rgba(230, 197, 120, 0) 65%);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease-out;
+}
+
+.whybuy-judge-nameplate {
+  font-family: 'Cormorant Garamond', Georgia, serif;
+  font-size: 12px;
+  letter-spacing: 0.4em;
+  text-transform: uppercase;
+  color: #c9a14a;
+  text-align: center;
+}
+
+.whybuy-judge-title {
+  font-family: 'Cormorant Garamond', Georgia, serif;
+  font-size: 56px;
+  font-weight: 700;
+  color: #f7eed7;
+  letter-spacing: 0.06em;
+  text-align: center;
+  line-height: 1;
+  text-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
+}
+
+.whybuy-judge-sub {
+  font-family: 'Cormorant Garamond', Georgia, serif;
+  font-size: 18px;
+  color: #e6c578;
+  font-style: italic;
+  text-align: center;
+  max-width: 520px;
+  line-height: 1.4;
+}
+
+.whybuy-judge-typing {
+  color: #c9a14a;
+  letter-spacing: 0.5em;
+  font-size: 12px;
+  margin-top: 4px;
+  animation: whybuy-pulse-soft 1.4s ease-in-out infinite;
+}
+
+/* Reveal phase */
+.whybuy-judge-reveal {
+  position: relative;
+  z-index: 1;
+  max-width: 640px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 0 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+
+.whybuy-judge-reveal .whybuy-reveal-line {
+  opacity: 0;
+  transform: translateY(10px);
+  animation: whybuy-reveal-up 600ms cubic-bezier(0.2, 0.7, 0.2, 1) forwards;
+}
+.whybuy-judge-reveal .whybuy-reveal-line:nth-child(1) { animation-delay: 100ms; }
+.whybuy-judge-reveal .whybuy-reveal-line:nth-child(2) { animation-delay: 350ms; }
+.whybuy-judge-reveal .whybuy-reveal-line:nth-child(3) { animation-delay: 600ms; }
+.whybuy-judge-reveal .whybuy-reveal-line:nth-child(4) { animation-delay: 850ms; }
+.whybuy-judge-reveal .whybuy-reveal-line:nth-child(5) { animation-delay: 1100ms; }
+.whybuy-judge-reveal .whybuy-reveal-line:nth-child(6) { animation-delay: 1350ms; }
+.whybuy-judge-reveal .whybuy-reveal-line:nth-child(7) { animation-delay: 1600ms; }
+
+@keyframes whybuy-reveal-up {
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.whybuy-judge-verdict-card {
+  background:
+    radial-gradient(60% 50% at 50% 0%, rgba(201, 161, 74, 0.18) 0%, transparent 70%),
+    linear-gradient(180deg, #22130c 0%, #120905 100%);
+  border: 2px solid #c9a14a;
+  border-radius: 10px;
+  box-shadow: 0 12px 60px rgba(0, 0, 0, 0.6), inset 0 0 0 1px rgba(247, 238, 215, 0.08);
+  padding: 32px 40px;
+  width: 100%;
+  text-align: center;
+}
+
+.whybuy-judge-reveal .whybuy-judge-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+
+.whybuy-confetti {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.whybuy-confetti i {
+  position: absolute;
+  top: -12px;
+  width: 6px;
+  height: 10px;
+  background: #c9a14a;
+  border-radius: 1px;
+  opacity: 0;
+  animation: whybuy-confetti-fall 1.8s ease-in forwards;
+}
+.whybuy-confetti i:nth-child(1)  { left:  8%; background: #e6c578; animation-delay: 0.00s; }
+.whybuy-confetti i:nth-child(2)  { left: 18%; background: #c9a14a; animation-delay: 0.05s; }
+.whybuy-confetti i:nth-child(3)  { left: 28%; background: #f0d99c; animation-delay: 0.10s; }
+.whybuy-confetti i:nth-child(4)  { left: 38%; background: #c9a14a; animation-delay: 0.15s; }
+.whybuy-confetti i:nth-child(5)  { left: 48%; background: #e6c578; animation-delay: 0.20s; }
+.whybuy-confetti i:nth-child(6)  { left: 58%; background: #c9a14a; animation-delay: 0.25s; }
+.whybuy-confetti i:nth-child(7)  { left: 68%; background: #f0d99c; animation-delay: 0.30s; }
+.whybuy-confetti i:nth-child(8)  { left: 78%; background: #e6c578; animation-delay: 0.35s; }
+.whybuy-confetti i:nth-child(9)  { left: 88%; background: #c9a14a; animation-delay: 0.40s; }
+.whybuy-confetti i:nth-child(10) { left: 95%; background: #c9a14a; animation-delay: 0.45s; }
+
+@keyframes whybuy-confetti-fall {
+  0%   { opacity: 0; transform: translateY(-12px) rotate(0deg); }
+  10%  { opacity: 1; }
+  100% { opacity: 0; transform: translateY(110vh) rotate(540deg); }
+}
+
+/* === Bench "Calling AI…" status === */
+
+.whybuy-bench-calling .whybuy-bench-pulse {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #e6c578;
+  box-shadow: 0 0 8px rgba(230, 197, 120, 0.7);
+  animation: whybuy-bench-pulse-dot 1.0s ease-in-out infinite;
+}
+
+@keyframes whybuy-bench-pulse-dot {
+  0%, 100% { opacity: 0.4; transform: scale(0.85); }
+  50%      { opacity: 1;   transform: scale(1.15); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .whybuy-bench-calling .whybuy-bench-pulse { animation: none; opacity: 1; }
+}

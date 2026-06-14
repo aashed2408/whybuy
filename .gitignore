@@ -1,0 +1,23 @@
+node_modules
+.wxt
+.output
+dist
+*.log
+.DS_Store
+.idea
+.vscode/settings.json
+*.local          # whybuy-keys.local.txt etc.
+.env*            # .env, .env.local, .env.*.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+whybuy-keys.txt
+puppeteer-cache
+.screenshots
+coverage
+# Dev screenshots and debug artifacts
+amazon-investigate.png
+screenshot-*.png
+# Test output logs (regenerate by running the scripts)
+scripts/amazon-flow-output.txt

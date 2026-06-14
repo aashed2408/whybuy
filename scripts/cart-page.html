@@ -1,0 +1,60 @@
+<!doctype html>
+<html>
+<head>
+  <title>Amazon-style Cart</title>
+  <script type="application/ld+json">
+  {"@context":"https://schema.org","@type":"Product","name":"Premium Wireless Headphones","image":"https://example.com/h.jpg","offers":{"@type":"Offer","price":"129.99","priceCurrency":"USD"}}
+  </script>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 900px; margin: 40px auto; padding: 20px; background: #fafafa; color: #111; }
+    h1 { font-size: 28px; }
+    .cart-item { display: flex; gap: 16px; padding: 16px; background: white; border: 1px solid #ddd; border-radius: 8px; margin-bottom: 12px; align-items: center; }
+    .cart-item img { width: 80px; height: 80px; background: #eee; border-radius: 4px; object-fit: cover; }
+    .cart-item .info { flex: 1; }
+    .cart-item .info h2 { margin: 0 0 4px; font-size: 16px; }
+    .cart-item .price { font-size: 18px; font-weight: 700; color: #b12704; }
+    .qty { color: #555; font-size: 13px; }
+    .subtotal { background: #f3f3f3; padding: 16px; border-radius: 8px; text-align: right; font-size: 18px; font-weight: 700; }
+    button.checkout { background: #ffd814; border: 1px solid #fcd200; padding: 12px 24px; border-radius: 20px; cursor: pointer; font-size: 14px; margin-top: 16px; }
+  </style>
+</head>
+<body>
+  <h1>Your Amazon Cart (3 items)</h1>
+
+  <div class="cart-item" data-asin="B001">
+    <img src="https://placehold.co/80x80/eee/999?text=HP" alt="" />
+    <div class="info">
+      <h2>Premium Wireless Headphones</h2>
+      <div class="qty">Qty: 1</div>
+    </div>
+    <div class="price">$129.99</div>
+  </div>
+
+  <div class="cart-item" data-asin="B002">
+    <img src="https://placehold.co/80x80/eee/999?text=CBL" alt="" />
+    <div class="info">
+      <h2>USB-C Charging Cable (2m)</h2>
+      <div class="qty">Qty: 2</div>
+    </div>
+    <div class="price">$19.99</div>
+  </div>
+
+  <div class="cart-item" data-asin="B003">
+    <img src="https://placehold.co/80x80/eee/999?text=CSE" alt="" />
+    <div class="info">
+      <h2>Protective Carrying Case</h2>
+      <div class="qty">Qty: 1</div>
+    </div>
+    <div class="price">$24.99</div>
+  </div>
+
+  <div class="subtotal" id="subtotal">Subtotal (4 items): $174.97</div>
+  <button class="checkout" id="buy" type="button">Proceed to checkout</button>
+
+  <script>
+    document.getElementById('buy').addEventListener('click', () => {
+      document.body.setAttribute('data-purchased', 'true')
+    })
+  </script>
+</body>
+</html>

@@ -1,0 +1,46 @@
+{
+  "name": "whybuy",
+  "description": "Courtroom-inspired purchase interceptor. The product is on trial. Argue for it. The judge decides.",
+  "version": "0.1.0",
+  "private": false,
+  "license": "UNLICENSED",
+  "type": "module",
+  "scripts": {
+    "dev": "wxt",
+    "dev:firefox": "wxt -b firefox",
+    "build": "wxt build",
+    "build:firefox": "wxt build -b firefox",
+    "zip": "wxt zip",
+    "zip:firefox": "wxt zip -b firefox",
+    "postinstall": "wxt prepare",
+    "typecheck": "wxt prepare && tsc --noEmit",
+    "test:unit": "node --experimental-strip-types --no-warnings --test scripts/unit.mjs",
+    "test:smoke": "node scripts/smoke.mjs",
+    "test:loss": "node scripts/loss-test.mjs",
+    "test:tier": "node scripts/tier-test.mjs",
+    "test:bug": "node scripts/bug-test.mjs",
+    "test:checkout": "node scripts/checkout-flow.mjs",
+    "test:cart": "node scripts/cart-fixture-test.mjs",
+    "test:cart-flow": "node scripts/cart-flow.mjs",
+    "test:product": "node scripts/product-fixture-test.mjs",
+    "test:product-flow": "node scripts/product-flow.mjs",
+    "test": "npm run test:unit && npm run build && npm run test:cart && npm run test:product && npm run test:checkout",
+    "load": "node scripts/load.mjs"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.287",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@wxt-dev/module-react": "^1.1.3",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.49",
+    "puppeteer": "^25.1.0",
+    "tailwindcss": "^3.4.16",
+    "typescript": "^5.6.3",
+    "wxt": "^0.20.0"
+  }
+}

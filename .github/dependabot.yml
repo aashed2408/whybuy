@@ -1,0 +1,23 @@
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+    # Don't auto-bump wxt, @wxt-dev/module-react, puppeteer, or
+    # puppeteer-core — those deserve a human eye.
+    ignore:
+      - dependency-name: "wxt"
+      - dependency-name: "@wxt-dev/module-react"
+      - dependency-name: "puppeteer"
+      - dependency-name: "puppeteer-core"
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"

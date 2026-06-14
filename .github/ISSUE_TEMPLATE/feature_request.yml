@@ -1,0 +1,32 @@
+name: Feature request
+description: Suggest a new behavior, prompt shape, UI surface, or provider integration.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe the user pain point. "As a user trying to…"
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: How should the extension behave? Be specific.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What else did you think about? Why is this better?
+    validations:
+      required: false
+  - type: textarea
+    id: mockup
+    attributes:
+      label: Mockup / example
+      description: ASCII art, a link to a screenshot, or a sample prompt/response.
+    validations:
+      required: false

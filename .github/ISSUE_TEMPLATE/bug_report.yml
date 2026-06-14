@@ -1,0 +1,83 @@
+name: Bug report
+description: Something is broken or behaving unexpectedly.
+labels: ["bug", "triage"]
+body:
+  - type: dropdown
+    id: provider
+    attributes:
+      label: AI provider
+      description: Which AI provider were you using when the bug occurred?
+      options:
+        - Ollama Cloud (free)
+        - Ollama (local)
+        - Google Gemini
+        - Groq
+        - OpenRouter
+        - Chrome built-in AI (Prompt API)
+        - Scripted fallback (no real AI)
+        - Not configured yet
+    validations:
+      required: true
+  - type: dropdown
+    id: model
+    attributes:
+      label: Model
+      description: Which model, if you set one?
+      options:
+        - Default (provider default)
+        - ministral-3:3b
+        - ministral-3:8b
+        - ministral-3:14b
+        - gpt-oss:20b
+        - Other (specify in description)
+    validations:
+      required: false
+  - type: dropdown
+    id: site
+    attributes:
+      label: Site where the trial fired
+      description: Which e-commerce site triggered the trial?
+      options:
+        - Amazon (.com / .ca / other locale)
+        - eBay
+        - Shopify store
+        - Other (specify in description)
+    validations:
+      required: true
+  - type: dropdown
+    id: judge-mode
+    attributes:
+      label: Judge output mode
+      options:
+        - Natural (default)
+        - Structured (think+JSON)
+        - Don't know
+    validations:
+      required: false
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: Describe the actual behavior, including any error text from the trial or the console.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: What did you do, in order, before the bug showed up?
+    validations:
+      required: false
+  - type: textarea
+    id: last-prompt
+    attributes:
+      label: Last AI prompt (from Options → Last AI Prompts)
+      description: Paste the system + user prompt the AI was sent. This is the single most useful piece of debug info.
+    validations:
+      required: false

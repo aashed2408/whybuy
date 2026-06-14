@@ -1,0 +1,42 @@
+<!doctype html>
+<html>
+<head>
+  <title>Test Product · $129.99</title>
+  <script type="application/ld+json">
+  {"@context":"https://schema.org","@type":"Product","name":"Premium Wireless Headphones","image":"https://example.com/headphones.jpg","offers":{"@type":"Offer","price":"129.99","priceCurrency":"USD"}}
+  </script>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 720px; margin: 40px auto; padding: 20px; color: #111; }
+    h1 { font-size: 24px; }
+    .row { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
+    .btn { padding: 12px 24px; font-size: 15px; cursor: pointer; border-radius: 6px; border: 1px solid #ccc; background: #f7f7f7; }
+    .btn.primary { background: #ffd814; border-color: #fcd200; }
+  </style>
+</head>
+<body>
+  <h1>Premium Wireless Headphones</h1>
+  <p>$129.99</p>
+  <div class="row">
+    <button id="add" class="btn" type="button">Add to cart</button>
+    <button id="buy" class="btn" type="button">Buy Now</button>
+    <button id="place" class="btn" type="button">Place your order</button>
+    <button id="checkout" class="btn primary" type="button">Proceed to checkout</button>
+  </div>
+  <p id="status" style="margin-top:24px;color:#666;font-size:13px;"></p>
+  <script>
+    const status = document.getElementById('status')
+    document.getElementById('add').addEventListener('click', () => {
+      status.textContent = 'Add to cart clicked — should NOT trigger the trial.'
+    })
+    document.getElementById('buy').addEventListener('click', () => {
+      status.textContent = 'Buy Now clicked — should NOT trigger the trial.'
+    })
+    document.getElementById('place').addEventListener('click', () => {
+      status.textContent = 'Place your order clicked — should NOT trigger the trial.'
+    })
+    document.getElementById('checkout').addEventListener('click', () => {
+      document.body.setAttribute('data-purchased', 'true')
+    })
+  </script>
+</body>
+</html>

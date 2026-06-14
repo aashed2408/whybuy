@@ -1,0 +1,21 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { color-scheme: dark; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  background: linear-gradient(180deg, #1a0e08 0%, #120905 100%);
+  color: #f7eed7;
+  font-family: 'Inter', system-ui, sans-serif;
+}
+
+#root { max-width: 720px; margin: 0 auto; padding: 40px 28px 60px; }
+
+* { box-sizing: border-box; }
+
+button { font-family: inherit; }
+input, select { font-family: inherit; }

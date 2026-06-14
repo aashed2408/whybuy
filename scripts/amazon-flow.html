@@ -1,0 +1,72 @@
+<!doctype html>
+<html>
+<head>
+  <title>Amazon-style Cart</title>
+  <script type="application/ld+json">
+  {"@context":"https://schema.org","@type":"Product","name":"Premium Wireless Headphones","image":"https://example.com/h.jpg","offers":{"@type":"Offer","price":"129.99","priceCurrency":"USD"}}
+  </script>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 800px; margin: 40px auto; padding: 20px; }
+    h1 { font-size: 24px; }
+    button { padding: 12px 24px; font-size: 16px; cursor: pointer; margin: 8px 0; }
+    a { display: inline-block; padding: 12px 24px; background: #ffd814; color: #000; text-decoration: none; border-radius: 20px; }
+    a:hover { background: #f7ca00; }
+  </style>
+</head>
+<body>
+  <h1>Your Amazon Cart</h1>
+  <div>
+    <strong>Premium Wireless Headphones</strong> — $129.99
+  </div>
+  <p>Subtotal: $129.99</p>
+  <a href="?step=checkout" id="proceed">Proceed to checkout</a>
+  <script>
+    // Simulate SPA navigation.
+    document.getElementById('proceed').addEventListener('click', (e) => {
+      e.preventDefault()
+      history.pushState({}, '', '?step=checkout')
+      document.body.innerHTML = `
+        <h1>Checkout — Shipping Address</h1>
+        <p>123 Main St, Toronto, ON</p>
+        <a href="#" id="continue">Continue to payment</a>
+        <script type="application/ld+json">
+        {"@context":"https://schema.org","@type":"Product","name":"Premium Wireless Headphones","image":"https://example.com/h.jpg","offers":{"@type":"Offer","price":"129.99","priceCurrency":"USD"}}
+        <\/script>
+        <script>
+          document.getElementById('continue').addEventListener('click', (ev) => {
+            ev.preventDefault()
+            history.pushState({}, '', '?step=payment')
+            document.body.innerHTML = \`
+              <h1>Choose a payment method</h1>
+              <p>Visa ending in 4242</p>
+              <a href="#" id="final">Continue</a>
+              <script type="application/ld+json">
+              {"@context":"https://schema.org","@type":"Product","name":"Premium Wireless Headphones","image":"https://example.com/h.jpg","offers":{"@type":"Offer","price":"129.99","priceCurrency":"USD"}}
+              <\\/script>
+              <script>
+                document.getElementById('final').addEventListener('click', (ev2) => {
+                  ev2.preventDefault()
+                  history.pushState({}, '', '?step=pay')
+                  document.body.innerHTML = \\\\`
+                    <h1>Review your order</h1>
+                    <p>Premium Wireless Headphones — USD 129.99</p>
+                    <button type="button" id="place">Place your order</button>
+                    <script type="application/ld+json">
+                    {"@context":"https://schema.org","@type":"Product","name":"Premium Wireless Headphones","image":"https://example.com/h.jpg","offers":{"@type":"Offer","price":"129.99","priceCurrency":"USD"}}
+                    <\\\\/script>
+                    <script>
+                      document.getElementById('place').addEventListener('click', () => {
+                        document.body.setAttribute('data-purchased', 'true')
+                      })
+                    <\\\\/script>
+                  \\\\`
+                })
+              <\\/script>
+            \`
+          })
+        <\/script>
+      `
+    })
+  </script>
+</body>
+</html>

@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Amazon.com Shopping Cart</title>
+</head>
+<body>
+  <!--
+    Fixture for the Amazon cart extractor. The page is shaped like a real
+    Amazon cart with:
+      - 2 real items inside the #activeCartViewForm
+      - 6 recommendation rows OUTSIDE the active cart form
+        (3 in "frequently bought together", 3 in "customers also bought")
+
+    The extractor must return exactly 2 items, not 8. The two real items
+    include a "rich details" set: brand, rating, review count, Prime,
+    delivery, stock, was-price, "save" line, seller, and variation.
+
+    Run via scripts/cart-fixture-test.mjs.
+  -->
+  <h1>Amazon.com Shopping Cart</h1>
+
+  <!-- ============ ACTIVE CART (2 items) ============ -->
+  <form id="activeCartViewForm" data-name="Active Cart Form">
+    <div data-name="Active Items">
+      <h2>Active Items (2)</h2>
+
+      <!-- Real item 1: Anker USB-C Hub. Has a strikethrough was-price. -->
+      <div data-asin="B07FZ8S74R" data-component="p13n-asin-list" class="sc-list-item">
+        <div class="sc-product-title">
+          <a class="a-link-normal" href="https://www.amazon.com/dp/B07FZ8S74R">
+            <span class="a-truncate-cut">Anker USB-C Hub, 7-in-1 Adapter with 4K HDMI</span>
+          </a>
+        </div>
+        <div class="a-row a-size-base">
+          <a class="a-link-normal" href="/s?k=Anker">Anker</a>
+        </div>
+        <div class="a-row">
+          <i class="a-icon-star-mini">
+            <span class="a-icon-alt" aria-label="4.7 out of 5 stars">4.7 out of 5 stars</span>
+          </i>
+          <a href="#customerReviews" aria-label="12,453 ratings">12,453</a>
+        </div>
+        <div class="a-row">
+          <i class="a-icon-prime" aria-label="Prime"></i>
+        </div>
+        <div id="deliveryMessageMirId">
+          <span class="a-color-base">FREE delivery Mon, Jun 16</span>
+        </div>
+        <div id="availability" class="a-row">
+          <span class="a-color-state">In stock</span>
+        </div>
+        <div class="a-price">
+          <span class="a-price a-text-strike">
+            <span class="a-offscreen">$49.99</span>
+          </span>
+          <span class="a-offscreen">$35.99</span>
+        </div>
+        <div id="savingsCell">
+          <span class="a-color-savings">Save $14.00 (28%)</span>
+        </div>
+        <div class="a-row a-size-mini">
+          <a class="a-link-normal" data-action="show-all-offers-displayname">Ships from and sold by Amazon.com</a>
+        </div>
+        <select name="quantity">
+          <option value="1" selected>1</option>
+          <option value="2">2</option>
+        </select>
+      </div>
+
+      <!-- Real item 2: Logitech MX Master 3S. Full price, no discount. -->
+      <div data-asin="B09JQMJHXY" data-component="p13n-asin-list" class="sc-list-item">
+        <div class="sc-product-title">
+          <a class="a-link-normal" href="https://www.amazon.com/dp/B09JQMJHXY">
+            <span class="a-truncate-cut">Logitech MX Master 3S Wireless Mouse</span>
+          </a>
+        </div>
+        <div class="a-row a-size-base">
+          <a class="a-link-normal" href="/s?k=Logitech">Logitech</a>
+        </div>
+        <div class="a-row">
+          <i class="a-icon-star-mini">
+            <span class="a-icon-alt" aria-label="4.8 out of 5 stars">4.8 out of 5 stars</span>
+          </i>
+          <a href="#customerReviews" aria-label="50,214 ratings">50,214</a>
+        </div>
+        <div class="a-row">
+          <i class="a-icon-prime" aria-label="Prime"></i>
+        </div>
+        <div id="deliveryMessageMirId2">
+          <span class="a-color-base">FREE delivery Tomorrow, Jun 14</span>
+        </div>
+        <div id="availability2" class="a-row">
+          <span class="a-color-state">In stock</span>
+        </div>
+        <div class="a-row a-size-mini">
+          <span class="a-color-secondary">Color: Graphite</span>
+        </div>
+        <div class="a-row">
+          <a class="a-link-normal" data-action="show-all-offers-displayname">Ships from and sold by Amazon.com</a>
+        </div>
+        <div class="a-price">
+          <span class="a-offscreen">$99.99</span>
+        </div>
+        <select name="quantity">
+          <option value="1" selected>1</option>
+        </select>
+      </div>
+
+      <!-- Removed item: in the DOM (Amazon's "undo" pattern) but
+           hidden via display:none. The extractor must NOT count this.
+           The class is sc-list-item sc-list-item-removed to mimic
+           what Amazon's cart sets after clicking "Delete". -->
+      <div
+        data-asin="B0REMOVED1"
+        data-component="p13n-asin-list"
+        class="sc-list-item sc-list-item-removed"
+        style="display: none;"
+        data-cart-item-state="DELETED"
+      >
+        <div class="sc-product-title">
+          <span class="a-truncate-cut">Removed Item - This Should Not Be Counted</span>
+        </div>
+        <div class="a-price">
+          <span class="a-offscreen">$999.99</span>
+        </div>
+        <select name="quantity">
+          <option value="0">0</option>
+          <option value="1" selected>1</option>
+        </select>
+      </div>
+    </div>
+
+    <div id="subtotals-marketplace-table">
+      <span class="a-color-price">$135.98</span>
+    </div>
+  </form>
+
+  <!-- ============ RECOMMENDATION RAILS (must NOT be counted) ============ -->
+
+  <!-- Frequently bought together -->
+  <div data-name="Frequently Bought Together" data-component-type="s-search-result">
+    <h2>Frequently bought together</h2>
+    <div data-asin="B0REC00001" data-component-type="s-search-result">
+      <span class="a-size-base-plus">Recommendation A — fake USB cable</span>
+      <span class="a-offscreen">$8.99</span>
+    </div>
+    <div data-asin="B0REC00002" data-component-type="s-search-result">
+      <span class="a-size-base-plus">Recommendation B — fake mousepad</span>
+      <span class="a-offscreen">$14.50</span>
+    </div>
+    <div data-asin="B0REC00003" data-component-type="s-search-result">
+      <span class="a-size-base-plus">Recommendation C — fake keyboard cover</span>
+      <span class="a-offscreen">$22.00</span>
+    </div>
+  </div>
+
+  <!-- Customers also bought -->
+  <div data-name="Customers Also Bought" data-component-type="s-search-result">
+    <h2>Customers who bought items in your cart also bought</h2>
+    <div data-asin="B0REC00004" data-component-type="s-search-result">
+      <span class="a-size-base-plus">Recommendation D — fake screen protector</span>
+      <span class="a-offscreen">$11.99</span>
+    </div>
+    <div data-asin="B0REC00005" data-component-type="s-search-result">
+      <span class="a-size-base-plus">Recommendation E — fake webcam cover</span>
+      <span class="a-offscreen">$6.50</span>
+    </div>
+    <div data-asin="B0REC00006" data-component-type="s-search-result">
+      <span class="a-size-base-plus">Recommendation F — fake laptop stand</span>
+      <span class="a-offscreen">$28.75</span>
+    </div>
+  </div>
+
+  <!-- "Proceed to checkout" so the click-interceptor fixture can also be exercised -->
+  <a class="a-button-input" href="/checkout">Proceed to checkout</a>
+</body>
+</html>
