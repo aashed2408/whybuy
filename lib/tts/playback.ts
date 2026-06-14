@@ -169,30 +169,39 @@ export class TtsPlayback {
   // === private ===
 
   private async drain(): Promise<void> {
+    // Set the playing flag SYNCHRONOUSLY (before any await) so two
+    // speak() calls that arrive in the same tick cannot both pass the
+    // "if (this.playing) return" check and end up running the while
+    // loop concurrently. That race produced overlapping audio where
+    // each new sentence restarted from offset 0 over the still-playing
+    // previous one.
     if (this.playing) return
-    if (!this.ctx) {
-      // Lazy-start. We may have been instantiated before the user
-      // gesture — try to start now. If that fails, the user
-      // probably hasn't clicked the checkout button yet, but
-      // speaking the queued text immediately after the click is
-      // a user-gesture-initiated action.
-      if (!this.start()) return
-    }
-    if (this.ctx?.state === 'suspended') {
-      try {
-        await this.ctx.resume()
-      } catch {}
-    }
     this.playing = true
-    while (this.queue.length > 0) {
-      const item = this.queue.shift()!
-      const buf = await this.fetchAndDecode(item)
-      if (!buf) continue
-      this.emitState('playing')
-      await this.playBuffer(buf)
+    try {
+      if (!this.ctx) {
+        // Lazy-start. We may have been instantiated before the user
+        // gesture — try to start now. If that fails, the user
+        // probably hasn't clicked the checkout button yet, but
+        // speaking the queued text immediately after the click is
+        // a user-gesture-initiated action.
+        if (!this.start()) return
+      }
+      if (this.ctx?.state === 'suspended') {
+        try {
+          await this.ctx.resume()
+        } catch {}
+      }
+      while (this.queue.length > 0) {
+        const item = this.queue.shift()!
+        const buf = await this.fetchAndDecode(item)
+        if (!buf) continue
+        this.emitState('playing')
+        await this.playBuffer(buf)
+      }
+    } finally {
+      this.playing = false
+      this.emitState('idle')
     }
-    this.playing = false
-    this.emitState('idle')
   }
 
   private async fetchAndDecode(item: QueuedItem): Promise<AudioBuffer | null> {
@@ -233,19 +242,32 @@ export class TtsPlayback {
         resolve()
         return
       }
+      // Stop any leftover source so audio plays strictly sequentially.
+      // (With the synchronous playing flag this should never happen,
+      // but it defends against a previous interrupted source that
+      // somehow lingered.)
+      if (this.currentSource) {
+        try {
+          this.currentSource.stop()
+        } catch {}
+        this.currentSource = null
+      }
       const src = this.ctx.createBufferSource()
       src.buffer = buf
       src.connect(this.gain)
       this.currentSource = src
-      src.onended = () => {
-        this.currentSource = null
+      let settled = false
+      const done = () => {
+        if (settled) return
+        settled = true
+        if (this.currentSource === src) this.currentSource = null
         resolve()
       }
+      src.onended = done
       try {
         src.start(0)
       } catch {
-        this.currentSource = null
-        resolve()
+        done()
       }
     })
   }

@@ -1597,3 +1597,204 @@ test('SentenceBuffer: handles the judge paragraph shape', () => {
   // The ruling line is emitted on the same push (period present).
   assert.equal(b.push('I rule in favor of restraint.'), 'I rule in favor of restraint.')
 })
+
+// === TtsPlayback race-condition regression test ===
+//
+// Bug: speak() calls arriving in the same tick used to produce
+// overlapping audio (each sentence cut off mid-word, the next one
+// starting from offset 0). Root cause: drain() checked the playing
+// flag, then awaited ctx.resume() before setting it true, so multiple
+// drain() invocations all passed the check and ran their while loops
+// in parallel.
+//
+// Fix: drain() now sets the playing flag SYNCHRONOUSLY at the top,
+// before any await. This test asserts that at most one audio source
+// is active at a time, even when speak() is called many times in
+// rapid succession.
+
+import { TtsPlayback } from '../lib/tts/playback.ts'
+
+test('TtsPlayback: rapid speak() calls play strictly sequentially (no overlapping audio)', async () => {
+  // Mock AudioContext + fetch on globalThis so playback.ts works in Node.
+  // We track how many sources are currently active. With the fix, the
+  // max should be 1 — drain() holds the playing flag synchronously so
+  // only one while loop can be running at a time.
+  const savedAudioContext = globalThis.AudioContext
+  const savedFetch = globalThis.fetch
+
+  let activeSourceCount = 0
+  let maxActiveSourceCount = 0
+
+  const mockCtx = {
+    state: 'running',
+    destination: {},
+    createGain() {
+      return { gain: { value: 1 }, connect() {} }
+    },
+    createBufferSource() {
+      activeSourceCount++
+      if (activeSourceCount > maxActiveSourceCount) {
+        maxActiveSourceCount = activeSourceCount
+      }
+      const src = {
+        buffer: null,
+        connect() {},
+        onended: null,
+        start() {
+          // Simulate ~30ms of playback. Long enough that the next
+          // speak() in the queue arrives while we're still playing —
+          // that's the exact race window the bug used to lose.
+          setTimeout(() => {
+            if (src.ended) return
+            src.ended = true
+            activeSourceCount--
+            if (src.onended) src.onended()
+          }, 30)
+        },
+        stop() {
+          if (src.ended) return
+          src.ended = true
+          activeSourceCount--
+          if (src.onended) src.onended()
+        },
+        ended: false,
+      }
+      return src
+    },
+    async decodeAudioData(_buf) {
+      return { duration: 0.03 }
+    },
+    async resume() {
+      this.state = 'running'
+    },
+    async close() {
+      this.state = 'closed'
+    },
+  }
+
+  globalThis.AudioContext = function () {
+    return mockCtx
+  }
+  // Mock fetch to return a fake MP3 blob. elevenLabsTts uses fetch
+  // internally; we don't care about the content, just that the
+  // promise resolves.
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    arrayBuffer: async () => new ArrayBuffer(8),
+  })
+
+  try {
+    const pb = new TtsPlayback()
+    assert.equal(pb.start(), true, 'AudioContext should start')
+
+    // Push 8 speak() calls in the same tick. With the bug, each one
+    // would start its own AudioBufferSourceNode in parallel.
+    const N = 8
+    for (let i = 0; i < N; i++) {
+      pb.speak(`Sentence ${i}.`, { apiKey: 'sk_test', voiceId: 'test_voice' })
+    }
+
+    // Wait for the queue to drain. 8 sentences * 30ms = 240ms; give
+    // it plenty of slack for fetch + decode overhead.
+    await new Promise((resolve) => setTimeout(resolve, 500))
+
+    assert.equal(
+      maxActiveSourceCount,
+      1,
+      `Expected at most 1 active audio source at a time, got max ${maxActiveSourceCount}. ` +
+        `Multiple concurrent sources means drain() ran in parallel and audio overlapped.`,
+    )
+    assert.equal(activeSourceCount, 0, `Expected all sources to have ended, got ${activeSourceCount} still active`)
+  } finally {
+    if (savedAudioContext) globalThis.AudioContext = savedAudioContext
+    else delete globalThis.AudioContext
+    if (savedFetch) globalThis.fetch = savedFetch
+    else delete globalThis.fetch
+  }
+})
+
+test('TtsPlayback: interrupt() mid-stream stops the current source and clears the queue', async () => {
+  const savedAudioContext = globalThis.AudioContext
+  const savedFetch = globalThis.fetch
+
+  let activeSourceCount = 0
+
+  const mockCtx = {
+    state: 'running',
+    destination: {},
+    createGain() {
+      return { gain: { value: 1 }, connect() {} }
+    },
+    createBufferSource() {
+      activeSourceCount++
+      const src = {
+        buffer: null,
+        connect() {},
+        onended: null,
+        start() {
+          // Long playback so interrupt() has time to fire mid-stream.
+          setTimeout(() => {
+            if (src.ended) return
+            src.ended = true
+            activeSourceCount--
+            if (src.onended) src.onended()
+          }, 200)
+        },
+        stop() {
+          if (src.ended) return
+          src.ended = true
+          activeSourceCount--
+          if (src.onended) src.onended()
+        },
+        ended: false,
+      }
+      return src
+    },
+    async decodeAudioData(_buf) {
+      return { duration: 0.2 }
+    },
+    async resume() {
+      this.state = 'running'
+    },
+    async close() {},
+  }
+
+  globalThis.AudioContext = function () {
+    return mockCtx
+  }
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    arrayBuffer: async () => new ArrayBuffer(8),
+  })
+
+  try {
+    const pb = new TtsPlayback()
+    pb.start()
+
+    // Push 3 sentences, then interrupt in the middle.
+    pb.speak('First sentence.', { apiKey: 'sk_test', voiceId: 'test_voice' })
+    pb.speak('Second sentence.', { apiKey: 'sk_test', voiceId: 'test_voice' })
+    pb.speak('Third sentence.', { apiKey: 'sk_test', voiceId: 'test_voice' })
+
+    // Let the first sentence start playing.
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    assert.equal(activeSourceCount, 1, 'First sentence should be playing')
+
+    // Interrupt.
+    pb.interrupt()
+    // The current source should be stopped immediately.
+    assert.equal(activeSourceCount, 0, 'Current source should be stopped by interrupt()')
+    assert.equal(pb.queueLength(), 0, 'Queue should be cleared by interrupt()')
+
+    // Wait a bit to make sure no late sources start.
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    assert.equal(activeSourceCount, 0, 'No sources should be active after interrupt()')
+  } finally {
+    if (savedAudioContext) globalThis.AudioContext = savedAudioContext
+    else delete globalThis.AudioContext
+    if (savedFetch) globalThis.fetch = savedFetch
+    else delete globalThis.fetch
+  }
+})
