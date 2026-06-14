@@ -3,7 +3,7 @@
 <head>
   <title>Amazon-style Cart</title>
   <script type="application/ld+json">
-  {"@context":"https://schema.org","@type":"Product","name":"Premium Wireless Headphones","image":"https://example.com/h.jpg","offers":{"@type":"Offer","price":"129.99","priceCurrency":"USD"}}
+  {"@context":"https://schema.org","@type":"Product","name":"Premium Wireless Headphones","image":"https://example.com/h.jpg","offers":{"@type":"Offer","price":"129.99","priceCurrency":"CAD"}}
   </script>
   <style>
     body { font-family: Arial, sans-serif; max-width: 800px; margin: 40px auto; padding: 20px; }
@@ -30,7 +30,7 @@
         <p>123 Main St, Toronto, ON</p>
         <a href="#" id="continue">Continue to payment</a>
         <script type="application/ld+json">
-        {"@context":"https://schema.org","@type":"Product","name":"Premium Wireless Headphones","image":"https://example.com/h.jpg","offers":{"@type":"Offer","price":"129.99","priceCurrency":"USD"}}
+        {"@context":"https://schema.org","@type":"Product","name":"Premium Wireless Headphones","image":"https://example.com/h.jpg","offers":{"@type":"Offer","price":"129.99","priceCurrency":"CAD"}}
         <\/script>
         <script>
           document.getElementById('continue').addEventListener('click', (ev) => {
@@ -41,7 +41,7 @@
               <p>Visa ending in 4242</p>
               <a href="#" id="final">Continue</a>
               <script type="application/ld+json">
-              {"@context":"https://schema.org","@type":"Product","name":"Premium Wireless Headphones","image":"https://example.com/h.jpg","offers":{"@type":"Offer","price":"129.99","priceCurrency":"USD"}}
+              {"@context":"https://schema.org","@type":"Product","name":"Premium Wireless Headphones","image":"https://example.com/h.jpg","offers":{"@type":"Offer","price":"129.99","priceCurrency":"CAD"}}
               <\\/script>
               <script>
                 document.getElementById('final').addEventListener('click', (ev2) => {
@@ -49,10 +49,10 @@
                   history.pushState({}, '', '?step=pay')
                   document.body.innerHTML = \\\\`
                     <h1>Review your order</h1>
-                    <p>Premium Wireless Headphones — USD 129.99</p>
+                    <p>Premium Wireless Headphones — CAD 129.99</p>
                     <button type="button" id="place">Place your order</button>
                     <script type="application/ld+json">
-                    {"@context":"https://schema.org","@type":"Product","name":"Premium Wireless Headphones","image":"https://example.com/h.jpg","offers":{"@type":"Offer","price":"129.99","priceCurrency":"USD"}}
+                    {"@context":"https://schema.org","@type":"Product","name":"Premium Wireless Headphones","image":"https://example.com/h.jpg","offers":{"@type":"Offer","price":"129.99","priceCurrency":"CAD"}}
                     <\\\\/script>
                     <script>
                       document.getElementById('place').addEventListener('click', () => {

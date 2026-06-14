@@ -208,8 +208,8 @@ try {
     if (cart.source === 'amazon') pass('source === "amazon"')
     else fail(`source should be "amazon", got "${cart.source}"`)
 
-    if (cart.currency === 'USD') pass('currency === "USD"')
-    else fail(`currency should be "USD", got "${cart.currency}"`)
+    if (cart.currency === 'CAD') pass('currency === "CAD"')
+    else fail(`currency should be "CAD", got "${cart.currency}"`)
   }
 } catch (err) {
   console.error('\n✘ Cart fixture test failed:', err.message)

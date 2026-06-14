@@ -12,7 +12,7 @@ import { prosecutionSystemPrompt, judgeSystemPrompt } from '../lib/ai/prompts.ts
 const product = {
   name: 'Test Product',
   price: 99.99,
-  currency: 'USD',
+  currency: 'CAD',
   imageUrl: null,
   url: 'https://example.com/p/1',
   domain: 'example.com',
@@ -195,7 +195,7 @@ test('URL tiering stubs always return false (no auto-trigger)', async () => {
 const sampleProduct = {
   name: 'Premium Wireless Headphones',
   price: 129.99,
-  currency: 'USD',
+  currency: 'CAD',
   imageUrl: null,
   url: 'https://example.com/p/1',
   domain: 'example.com',
@@ -204,11 +204,11 @@ const sampleProduct = {
 
 const sampleCart = {
   items: [
-    { name: 'Headphones', price: 129.99, currency: 'USD', imageUrl: null, quantity: 1, url: null },
-    { name: 'USB-C Cable', price: 19.99, currency: 'USD', imageUrl: null, quantity: 2, url: null },
+    { name: 'Headphones', price: 129.99, currency: 'CAD', imageUrl: null, quantity: 1, url: null },
+    { name: 'USB-C Cable', price: 19.99, currency: 'CAD', imageUrl: null, quantity: 2, url: null },
   ],
   total: 169.97,
-  currency: 'USD',
+  currency: 'CAD',
   itemCount: 3,
   source: 'amazon',
   isCheckout: false,
@@ -296,7 +296,7 @@ test('judgeSystemPrompt includes brand/rating/reviewCount/prime from details', (
       {
         name: 'Anker USB-C Hub',
         price: 35.99,
-        currency: 'USD',
+        currency: 'CAD',
         imageUrl: null,
         quantity: 1,
         url: 'https://amazon.com/dp/B07FZ8S74R',
@@ -315,7 +315,7 @@ test('judgeSystemPrompt includes brand/rating/reviewCount/prime from details', (
       },
     ],
     total: 35.99,
-    currency: 'USD',
+    currency: 'CAD',
     itemCount: 1,
     source: 'amazon',
     isCheckout: false,
@@ -328,7 +328,7 @@ test('judgeSystemPrompt includes brand/rating/reviewCount/prime from details', (
   // "diamond vs dirt" signals are in the user's defense, not the
   // subject block.
   assert.match(prompt, /PRODUCT: Anker USB-C Hub/)
-  assert.match(prompt, /PRICE:\s+USD 35\.99/)
+  assert.match(prompt, /PRICE:\s+CAD 35\.99/)
   assert.match(prompt, /SITE:\s+example\.com/)
   // The judge must end with a clear ruling line.
   assert.match(prompt, /I rule in favor of the purchase\./)
@@ -348,7 +348,7 @@ test('prosecutionSystemPrompt shows the brand/rating in the subject', () => {
       {
         name: 'Cheap USB Hub',
         price: 8.99,
-        currency: 'USD',
+        currency: 'CAD',
         imageUrl: null,
         quantity: 1,
         url: null,
@@ -361,7 +361,7 @@ test('prosecutionSystemPrompt shows the brand/rating in the subject', () => {
       },
     ],
     total: 8.99,
-    currency: 'USD',
+    currency: 'CAD',
     itemCount: 1,
     source: 'amazon',
     isCheckout: false,
@@ -403,7 +403,7 @@ test('prosecution prompt names the product in the role framing', () => {
   // background.
   const prompt = prosecutionSystemPrompt(sampleProduct, null, { detail: 'minimal' })
   assert.match(prompt, /Premium Wireless Headphones/)
-  assert.match(prompt, /USD 129\.99/)
+  assert.match(prompt, /CAD 129\.99/)
   assert.match(prompt, /example\.com/)
   // The model is told it is talking about THIS specific thing.
   assert.match(prompt, /must be about THIS specific thing|not "a purchase" in general/i)
@@ -522,7 +522,7 @@ test('counsel opening user-prompt is category-first, conversational, no courtroo
   const out = buildCounselOpeningUserPrompt(sampleProduct, null)
   // Title still appears in the subject line (for model awareness).
   assert.match(out, /PRODUCT: Premium Wireless Headphones/)
-  assert.match(out, /USD 129\.99/)
+  assert.match(out, /CAD 129\.99/)
   assert.match(out, /example\.com/)
   // The new rule: open by naming the CATEGORY, not the full title.
   assert.match(out, /Open by naming the CATEGORY of the thing/i)
@@ -535,7 +535,7 @@ test('counsel opening user-prompt is category-first, conversational, no courtroo
   assert.match(out, /NEVER use "this product" \/ "this item" \/ "the item" \/ "this thing"/i)
   // The example shape uses the CATEGORY word ("headphones"), not the
   // full title, and the price is inline.
-  assert.match(out, /So you're about to spend USD 129\.99 on headphones/i)
+  assert.match(out, /So you're about to spend CAD 129\.99 on headphones/i)
 })
 
 test('counsel opening user-prompt: regression guard — old "Ladies and gentlemen" template is gone', () => {
@@ -604,7 +604,7 @@ test('counsel cart user-prompt names the first item, not the page h1', () => {
   const out = buildCounselSubjectLine(sampleProduct, sampleCart)
   // Multi-item cart: "<first item> + <N-1> other items totaling <total>"
   assert.match(out, /CART: Headphones \+ 1 other item/)
-  assert.match(out, /USD 169\.97/)
+  assert.match(out, /CAD 169\.97/)
   assert.match(out, /example\.com/)
   // Should NOT degrade to a single-product line that drops the rest.
   assert.doesNotMatch(out, /^PRODUCT:/m)
@@ -618,9 +618,9 @@ test('counsel opening user-prompt on a cart: category-first, no per-cart strict 
   // The new rule: category-first, not the literal full-title-in-sentence-1.
   assert.match(out, /Open by naming the CATEGORY of the thing/i)
   // The example uses the CATEGORY word (not the full title).
-  assert.match(out, /So you're about to spend USD 169\.97 on headphones/i)
+  assert.match(out, /So you're about to spend CAD 169\.97 on headphones/i)
   // The old per-cart "purchase of X" hardcoded opener is gone.
-  assert.doesNotMatch(out, /the purchase of Headphones at USD 169\.97 on example\.com/i)
+  assert.doesNotMatch(out, /the purchase of Headphones at CAD 169\.97 on example\.com/i)
   // The old "Ladies and gentlemen ... matter before the court"
   // template (cart or otherwise) is gone.
   assert.doesNotMatch(out, /Ladies and gentlemen of the jury, the matter before the court/i)
@@ -629,10 +629,10 @@ test('counsel opening user-prompt on a cart: category-first, no per-cart strict 
 test('single-item cart is treated as a single product (PRODUCT: line, not CART: line)', () => {
   const singleCart = {
     items: [
-      { name: 'Louis Vuitton: The Complete Fashion Collections', price: 96.33, currency: 'USD', imageUrl: null, quantity: 1, url: null },
+      { name: 'Louis Vuitton: The Complete Fashion Collections', price: 96.33, currency: 'CAD', imageUrl: null, quantity: 1, url: null },
     ],
     total: 96.33,
-    currency: 'USD',
+    currency: 'CAD',
     itemCount: 1,
     source: 'amazon',
     isCheckout: false,
@@ -642,7 +642,7 @@ test('single-item cart is treated as a single product (PRODUCT: line, not CART: 
   const pageLevelProduct = { ...sampleProduct, name: 'Cart', price: null, currency: null }
   const subject = buildCounselSubjectLine(pageLevelProduct, singleCart)
   assert.match(subject, /PRODUCT: Louis Vuitton: The Complete Fashion Collections/)
-  assert.match(subject, /USD 96\.33/)
+  assert.match(subject, /CAD 96\.33/)
   // Not the bogus "CART: 1 items" format from the old code.
   assert.doesNotMatch(subject, /CART: /)
 
@@ -652,7 +652,7 @@ test('single-item cart is treated as a single product (PRODUCT: line, not CART: 
   assert.match(opening, /PRODUCT: Louis Vuitton: The Complete Fashion Collections/)
   assert.match(opening, /Open by naming the CATEGORY of the thing/i)
   // Old hardcoded opener is gone.
-  assert.doesNotMatch(opening, /the purchase of Louis Vuitton: The Complete Fashion Collections at USD 96\.33 on example\.com/i)
+  assert.doesNotMatch(opening, /the purchase of Louis Vuitton: The Complete Fashion Collections at CAD 96\.33 on example\.com/i)
   // No courtroom language (the old hardcoded opener template).
   assert.doesNotMatch(opening, /Ladies and gentlemen of the jury, the matter before the court/i)
   // "the cart" is on the ban list.
@@ -671,21 +671,21 @@ test('getCooldownFingerprint: single product uses product.fingerprint', () => {
 test('getCooldownFingerprint: two different carts produce different keys', () => {
   const hatCart = {
     items: [
-      { name: 'Cool Hat', price: 25, currency: 'USD', imageUrl: null, quantity: 1, url: 'https://amazon.com/dp/B0HAT00001' },
+      { name: 'Cool Hat', price: 25, currency: 'CAD', imageUrl: null, quantity: 1, url: 'https://amazon.com/dp/B0HAT00001' },
     ],
     total: 25,
-    currency: 'USD',
+    currency: 'CAD',
     itemCount: 1,
     source: 'amazon',
     isCheckout: false,
   }
   const groceriesCart = {
     items: [
-      { name: 'Milk', price: 5, currency: 'USD', imageUrl: null, quantity: 1, url: 'https://amazon.com/dp/B0MILK0001' },
-      { name: 'Bread', price: 3, currency: 'USD', imageUrl: null, quantity: 2, url: 'https://amazon.com/dp/B0BREAD01' },
+      { name: 'Milk', price: 5, currency: 'CAD', imageUrl: null, quantity: 1, url: 'https://amazon.com/dp/B0MILK0001' },
+      { name: 'Bread', price: 3, currency: 'CAD', imageUrl: null, quantity: 2, url: 'https://amazon.com/dp/B0BREAD01' },
     ],
     total: 11,
-    currency: 'USD',
+    currency: 'CAD',
     itemCount: 3,
     source: 'amazon',
     isCheckout: false,
@@ -698,17 +698,17 @@ test('getCooldownFingerprint: two different carts produce different keys', () =>
 test('getCooldownFingerprint: same cart twice produces the same key (order-independent)', () => {
   const a = {
     items: [
-      { name: 'Milk', price: 5, currency: 'USD', imageUrl: null, quantity: 1, url: 'https://amazon.com/dp/B0MILK0001' },
-      { name: 'Bread', price: 3, currency: 'USD', imageUrl: null, quantity: 2, url: 'https://amazon.com/dp/B0BREAD01' },
+      { name: 'Milk', price: 5, currency: 'CAD', imageUrl: null, quantity: 1, url: 'https://amazon.com/dp/B0MILK0001' },
+      { name: 'Bread', price: 3, currency: 'CAD', imageUrl: null, quantity: 2, url: 'https://amazon.com/dp/B0BREAD01' },
     ],
-    total: 11, currency: 'USD', itemCount: 3, source: 'amazon', isCheckout: false,
+    total: 11, currency: 'CAD', itemCount: 3, source: 'amazon', isCheckout: false,
   }
   const b = {
     items: [
-      { name: 'Bread', price: 3, currency: 'USD', imageUrl: null, quantity: 2, url: 'https://amazon.com/dp/B0BREAD01' },
-      { name: 'Milk', price: 5, currency: 'USD', imageUrl: null, quantity: 1, url: 'https://amazon.com/dp/B0MILK0001' },
+      { name: 'Bread', price: 3, currency: 'CAD', imageUrl: null, quantity: 2, url: 'https://amazon.com/dp/B0BREAD01' },
+      { name: 'Milk', price: 5, currency: 'CAD', imageUrl: null, quantity: 1, url: 'https://amazon.com/dp/B0MILK0001' },
     ],
-    total: 11, currency: 'USD', itemCount: 3, source: 'amazon', isCheckout: false,
+    total: 11, currency: 'CAD', itemCount: 3, source: 'amazon', isCheckout: false,
   }
   assert.equal(getCooldownFingerprint(sampleProduct, a), getCooldownFingerprint(sampleProduct, b))
 })
@@ -716,9 +716,9 @@ test('getCooldownFingerprint: same cart twice produces the same key (order-indep
 test('getCooldownFingerprint: same items on different domains produce different keys', () => {
   const cart = {
     items: [
-      { name: 'Widget', price: 9, currency: 'USD', imageUrl: null, quantity: 1, url: 'https://example.com/dp/B0WID0001' },
+      { name: 'Widget', price: 9, currency: 'CAD', imageUrl: null, quantity: 1, url: 'https://example.com/dp/B0WID0001' },
     ],
-    total: 9, currency: 'USD', itemCount: 1, source: 'amazon', isCheckout: false,
+    total: 9, currency: 'CAD', itemCount: 1, source: 'amazon', isCheckout: false,
   }
   const a = getCooldownFingerprint({ ...sampleProduct, domain: 'amazon.com' }, cart)
   const b = getCooldownFingerprint({ ...sampleProduct, domain: 'ebay.com' }, cart)
@@ -728,9 +728,9 @@ test('getCooldownFingerprint: same items on different domains produce different 
 test('getCooldownLabel: single-item cart shows the item name', () => {
   const cart = {
     items: [
-      { name: 'Cool Hat', price: 25, currency: 'USD', imageUrl: null, quantity: 1, url: null },
+      { name: 'Cool Hat', price: 25, currency: 'CAD', imageUrl: null, quantity: 1, url: null },
     ],
-    total: 25, currency: 'USD', itemCount: 1, source: 'amazon', isCheckout: false,
+    total: 25, currency: 'CAD', itemCount: 1, source: 'amazon', isCheckout: false,
   }
   assert.equal(getCooldownLabel(cart, sampleProduct), 'Cool Hat')
 })
@@ -738,10 +738,10 @@ test('getCooldownLabel: single-item cart shows the item name', () => {
 test('getCooldownLabel: 2-item cart joins with "and"', () => {
   const cart = {
     items: [
-      { name: 'Cool Hat', price: 25, currency: 'USD', imageUrl: null, quantity: 1, url: null },
-      { name: 'Cool Gloves', price: 15, currency: 'USD', imageUrl: null, quantity: 1, url: null },
+      { name: 'Cool Hat', price: 25, currency: 'CAD', imageUrl: null, quantity: 1, url: null },
+      { name: 'Cool Gloves', price: 15, currency: 'CAD', imageUrl: null, quantity: 1, url: null },
     ],
-    total: 40, currency: 'USD', itemCount: 2, source: 'amazon', isCheckout: false,
+    total: 40, currency: 'CAD', itemCount: 2, source: 'amazon', isCheckout: false,
   }
   assert.equal(getCooldownLabel(cart, sampleProduct), 'Cool Hat and Cool Gloves')
 })
@@ -749,11 +749,11 @@ test('getCooldownLabel: 2-item cart joins with "and"', () => {
 test('getCooldownLabel: 3+ item cart says "N other items"', () => {
   const cart = {
     items: [
-      { name: 'Cool Hat', price: 25, currency: 'USD', imageUrl: null, quantity: 1, url: null },
-      { name: 'Cool Gloves', price: 15, currency: 'USD', imageUrl: null, quantity: 1, url: null },
-      { name: 'Cool Socks', price: 10, currency: 'USD', imageUrl: null, quantity: 1, url: null },
+      { name: 'Cool Hat', price: 25, currency: 'CAD', imageUrl: null, quantity: 1, url: null },
+      { name: 'Cool Gloves', price: 15, currency: 'CAD', imageUrl: null, quantity: 1, url: null },
+      { name: 'Cool Socks', price: 10, currency: 'CAD', imageUrl: null, quantity: 1, url: null },
     ],
-    total: 50, currency: 'USD', itemCount: 3, source: 'amazon', isCheckout: false,
+    total: 50, currency: 'CAD', itemCount: 3, source: 'amazon', isCheckout: false,
   }
   assert.equal(getCooldownLabel(cart, sampleProduct), 'Cool Hat and 2 other items')
 })
@@ -968,7 +968,7 @@ test('describeSubject for product WITH brand includes Brand line and rating (ric
   const productWithBrand = {
     name: 'Anker USB-C Hub, 7-in-1 Adapter with 4K HDMI',
     price: 35.99,
-    currency: 'USD',
+    currency: 'CAD',
     imageUrl: null,
     url: 'https://amazon.com/dp/B07FZ8S74R',
     domain: 'amazon.com',
@@ -990,7 +990,7 @@ test('describeSubject for product WITHOUT brand does NOT say "Brand: unknown" (r
   const productNoBrand = {
     name: 'Cool Random Thing',
     price: 9.99,
-    currency: 'USD',
+    currency: 'CAD',
     imageUrl: null,
     url: 'https://example.com/p/1',
     domain: 'example.com',
@@ -1008,7 +1008,7 @@ test('describeSubject judge prompt also drops "Brand: unknown" for no-brand prod
   const productNoBrand = {
     name: 'Cool Random Thing',
     price: 9.99,
-    currency: 'USD',
+    currency: 'CAD',
     imageUrl: null,
     url: 'https://example.com/p/1',
     domain: 'example.com',
@@ -1023,7 +1023,7 @@ test('describeSubject for product without brand does not include Rating when rat
   const product = {
     name: 'Mystery Item',
     price: 5,
-    currency: 'USD',
+    currency: 'CAD',
     imageUrl: null,
     url: 'https://example.com/p/1',
     domain: 'example.com',
@@ -1044,14 +1044,14 @@ test('describeSubject for product without brand does not include Rating when rat
   assert.doesNotMatch(subject, /\(\d[\d,]* reviews\)/, 'no "(N reviews)" in subject')
   // Subject still shows the product name and price.
   assert.match(subject, /PRODUCT: Mystery Item/)
-  assert.match(subject, /Price: USD 5\.00/)
+  assert.match(subject, /Price: CAD 5\.00/)
 })
 
 test('describeSubject includes Prime line when product.prime is true (rich mode)', () => {
   const product = {
     name: 'Anker Charger',
     price: 19.99,
-    currency: 'USD',
+    currency: 'CAD',
     imageUrl: null,
     url: 'https://amazon.com/dp/B0ABC',
     domain: 'amazon.com',
@@ -1073,10 +1073,10 @@ test('describeSubject includes Prime line when product.prime is true (rich mode)
 test('describeSubject: single-item cart uses PRODUCT: line, not "A cart with 1 item"', () => {
   const singleCart = {
     items: [
-      { name: 'Louis Vuitton: The Complete Fashion Collections', price: 96.33, currency: 'USD', imageUrl: null, quantity: 1, url: null, details: { brand: 'Louis Vuitton' } },
+      { name: 'Louis Vuitton: The Complete Fashion Collections', price: 96.33, currency: 'CAD', imageUrl: null, quantity: 1, url: null, details: { brand: 'Louis Vuitton' } },
     ],
     total: 96.33,
-    currency: 'USD',
+    currency: 'CAD',
     itemCount: 1,
     source: 'amazon',
     isCheckout: false,
@@ -1084,7 +1084,7 @@ test('describeSubject: single-item cart uses PRODUCT: line, not "A cart with 1 i
   const prompt = prosecutionSystemPrompt(sampleProduct, singleCart, { detail: 'minimal' })
   // Subject must use the cart item's title, not "Cart" / sampleProduct.name.
   assert.match(prompt, /PRODUCT: Louis Vuitton: The Complete Fashion Collections/)
-  assert.match(prompt, /PRICE:\s+USD 96\.33/)
+  assert.match(prompt, /PRICE:\s+CAD 96\.33/)
   // The "A cart with 1 item" framing must NOT appear.
   assert.doesNotMatch(prompt, /A cart with 1 item/i)
   // The role framing must reference the real product, not "Cart".
@@ -1094,10 +1094,10 @@ test('describeSubject: single-item cart uses PRODUCT: line, not "A cart with 1 i
 test('describeSubject: single-item cart rich mode uses the cart item details, not product details', () => {
   const singleCart = {
     items: [
-      { name: 'Louis Vuitton: The Complete Fashion Collections', price: 96.33, currency: 'USD', imageUrl: null, quantity: 1, url: null, details: { brand: 'Louis Vuitton', rating: 4.6, reviewCount: 234 } },
+      { name: 'Louis Vuitton: The Complete Fashion Collections', price: 96.33, currency: 'CAD', imageUrl: null, quantity: 1, url: null, details: { brand: 'Louis Vuitton', rating: 4.6, reviewCount: 234 } },
     ],
     total: 96.33,
-    currency: 'USD',
+    currency: 'CAD',
     itemCount: 1,
     source: 'amazon',
     isCheckout: false,
@@ -1878,7 +1878,7 @@ test('prosecutionSystemPrompt({detail:"minimal"}) sends only PRODUCT/PRICE/SITE'
   const p = prosecutionSystemPrompt(sampleProduct, null, { detail: 'minimal' })
   // Title must be present.
   assert.match(p, /PRODUCT: Premium Wireless Headphones/)
-  assert.match(p, /PRICE:\s+USD 129\.99/)
+  assert.match(p, /PRICE:\s+CAD 129\.99/)
   assert.match(p, /SITE:\s+example\.com/)
   // Rich-card fields must NOT appear in the prompt in minimal mode
   // (we only include the product card in rich mode now).
@@ -2006,7 +2006,7 @@ test('judgeSystemPrompt({judgeMode:"natural"}) also uses minimal subject', () =>
   const richProduct = { ...sampleProduct, brand: 'Anker', rating: 4.7, reviewCount: 12453 }
   const p = judgeSystemPrompt(richProduct, null, { judgeMode: 'natural' })
   assert.match(p, /PRODUCT: Premium Wireless Headphones/)
-  assert.match(p, /PRICE:\s+USD 129\.99/)
+  assert.match(p, /PRICE:\s+CAD 129\.99/)
   assert.doesNotMatch(p, /Brand:/)
   assert.doesNotMatch(p, /Rating:/)
   assert.doesNotMatch(p, /reviews/)

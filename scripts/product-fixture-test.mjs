@@ -46,7 +46,7 @@ const FIXTURES = [
       price: 35.99,
       rating: 4.7,
       reviewCount: 12453,
-      currency: 'USD',
+      currency: 'CAD',
     },
   },
   {
@@ -58,7 +58,7 @@ const FIXTURES = [
       name: 'Acme Mug',
       brand: 'Acme',
       price: 12.99,
-      currency: 'USD',
+      currency: 'CAD',
     },
   },
   {
@@ -70,7 +70,7 @@ const FIXTURES = [
       name: 'The Cool Hat',
       brand: null,
       price: 19.99,
-      currency: 'USD',
+      currency: 'CAD',
     },
   },
 ]

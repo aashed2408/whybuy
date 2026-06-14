@@ -3,8 +3,8 @@
 // module (which constructs the system prompt text).
 
 /**
- * Render a price as "USD 129.99" for inclusion in user prompts.
- * Returns "USD unavailable" or just "unavailable" when the price is
+ * Render a price as "CAD 129.99" for inclusion in user prompts.
+ * Returns "CAD unavailable" or just "unavailable" when the price is
  * missing.
  */
 export function formatCurrency(amount: number | null, currency: string | null): string {
