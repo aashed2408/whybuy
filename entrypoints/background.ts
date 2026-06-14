@@ -1,5 +1,6 @@
 import { selectProvider, type AIProvider, type Cart, type ChatMessage, type JudgeCallOptions, type Product, type Verdict } from '@/lib/ai/provider.ts'
 import { prosecutionSystemPrompt, judgeSystemPrompt, type PromptDetail, type JudgeMode } from '@/lib/ai/prompts.ts'
+import { buildCounselOpeningUserPrompt, buildCounselRebuttalUserPrompt } from '@/lib/ai/counselUserPrompt.ts'
 import { recordAiCall } from '@/lib/ai/debug.ts'
 import { TRIAL_PORT, type TrialEvent, type TrialRequest } from '@/lib/messaging/bus.ts'
 import { log, warn } from '@/lib/utils/log.ts'
@@ -285,18 +286,15 @@ async function runJudge(
 
 /**
  * Build the user-prompt body for a counsel turn, mirrored from the
- * provider's `counselTurn` body. Captured for the debug panel.
+ * provider's `counselTurn` body. Captured for the debug panel so the
+ * user can see exactly what was sent to the model.
  */
 function buildCounselUserPrompt(transcript: ChatMessage[], product: Product, cart: Cart | null): string {
-  const subjectLine =
-    cart && cart.items.length > 0
-      ? `CART: ${cart.itemCount} items totaling ${cart.total ?? '?'} ${cart.currency ?? ''} on ${product.domain}`
-      : `PRODUCT: ${product.name} (${product.price ?? '?'} ${product.currency ?? ''}) on ${product.domain}`
-  const t =
-    transcript.length === 0
-      ? 'Open the case against this purchase.'
-      : 'The defense just spoke. Rebut their point and introduce one new angle.'
-  return `${subjectLine}\n\n${t}`
+  const turn = transcript.filter((m) => m.role === 'prosecution').length + 1
+  if (transcript.length === 0) {
+    return buildCounselOpeningUserPrompt(product, cart)
+  }
+  return buildCounselRebuttalUserPrompt(product, cart, turn)
 }
 
 function buildJudgeUserPrompt(transcript: ChatMessage[], mode: JudgeMode): string {

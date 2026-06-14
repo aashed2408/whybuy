@@ -434,6 +434,54 @@ test('judge prompt enforces title naming in structured mode summary and factors'
   assert.match(prompt, /topFactors.*name the product/s)
 })
 
+// === User-prompt must embed the product title (not just the system prompt) ===
+//
+// Small / non-reasoning models on Ollama Cloud (e.g. `ministral-3:8b`)
+// only loosely attend to a long system prompt. The product title has
+// to be in the USER message at the point of generation, or the model
+// drifts into generic "this product is unnecessary" language.
+
+import { buildCounselSubjectLine, buildCounselOpeningUserPrompt, buildCounselRebuttalUserPrompt } from '../lib/ai/counselUserPrompt.ts'
+
+test('counsel opening user-prompt embeds the product title and a strict opener', () => {
+  const out = buildCounselOpeningUserPrompt(sampleProduct, null)
+  // Title must appear in the user message itself, not just the system prompt.
+  assert.match(out, /PRODUCT: Premium Wireless Headphones/)
+  assert.match(out, /USD 129\.99/)
+  assert.match(out, /example\.com/)
+  // Strict opener must include the title verbatim.
+  assert.match(out, /purchase of Premium Wireless Headphones at USD 129\.99 on example\.com/)
+  // The "first sentence must contain" rule is in the user prompt.
+  assert.match(out, /FIRST sentence must contain the exact product title "Premium Wireless Headphones"/i)
+  // The "never use" ban list is present.
+  assert.match(out, /Never use "this product", "this item"/i)
+})
+
+test('counsel rebuttal user-prompt still requires the product title', () => {
+  const out = buildCounselRebuttalUserPrompt(sampleProduct, null, 2)
+  assert.match(out, /PRODUCT: Premium Wireless Headphones/)
+  assert.match(out, /Name Premium Wireless Headphones by its title/i)
+  assert.match(out, /Never use "this product", "this item"/i)
+  assert.match(out, /prosecution turn 2/i)
+})
+
+test('counsel cart user-prompt mentions cart, not product', () => {
+  const out = buildCounselSubjectLine(sampleProduct, sampleCart)
+  assert.match(out, /CART: 3 items/)
+  assert.match(out, /USD 169\.97/)
+  assert.match(out, /example\.com/)
+  // Should NOT degrade to a single-product line.
+  assert.doesNotMatch(out, /PRODUCT: Premium Wireless Headphones/)
+})
+
+test('counsel opening user-prompt on a cart does not collapse to a product line', () => {
+  const out = buildCounselOpeningUserPrompt(sampleProduct, sampleCart)
+  assert.match(out, /CART: 3 items/)
+  // The opener still names the first item.
+  assert.match(out, /Headphones/)
+  assert.match(out, /NEVER/i)
+})
+
 // === Per-product-group cooldown fingerprinting ===
 
 import { getCooldownFingerprint, getCooldownLabel } from '../lib/storage/cooldowns.ts'

@@ -1,8 +1,9 @@
 import type { AIProvider, Cart, ChatMessage, ByokConfig, ByokProvider, Product, ProviderStatus, Verdict } from './types.ts'
-import { log, warn } from '@/lib/utils/log.ts'
+import { log, warn } from '../utils/log.ts'
 import { splitThinkBlocks } from './think.ts'
 import { parseNaturalVerdict, verdictFromNatural, type NaturalParseResult } from './judgeParse.ts'
 import { fallbackVerdict, normalizeDecision } from './verdictHelpers.ts'
+import { buildCounselSubjectLine, buildCounselOpeningUserPrompt, buildCounselRebuttalUserPrompt } from './counselUserPrompt.ts'
 
 // Re-export for tests / callers that import from byok.
 export { splitThinkBlocks }
@@ -174,14 +175,21 @@ export class BYOK implements AIProvider {
         content: m.text,
       })
     }
-    // Add a final user turn prompting the next prosecution statement.
+    // The product title is baked INTO the user message (not just the
+    // system prompt) so small / non-reasoning models like
+    // `ministral-3:8b` actually see it at the point of generation.
+    const turn = args.history.filter((m) => m.role === 'prosecution').length + 1
     const userMsg =
       args.history.length === 0
-        ? 'Open the case against this purchase.'
-        : 'The defense just spoke. Rebut their point and introduce one new angle.'
+        ? buildCounselOpeningUserPrompt(args.product, args.cart)
+        : buildCounselRebuttalUserPrompt(args.product, args.cart, turn)
     messages.push({ role: 'user', content: userMsg })
 
     return this.streamChat(messages, onChunk, signal, { tag: 'counsel' })
+  }
+
+  private buildSubjectLine(product: Product, cart: Cart | null): string {
+    return buildCounselSubjectLine(product, cart)
   }
 
   async judgeVerdict(
@@ -669,3 +677,5 @@ export class BYOK implements AIProvider {
     return out
   }
 }
+
+

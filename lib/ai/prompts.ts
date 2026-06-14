@@ -1,4 +1,6 @@
 import type { Cart, CartItem, Product } from './types.ts'
+import { formatCurrency } from './promptsHelpers.ts'
+export { formatCurrency } from './promptsHelpers.ts'
 
 /**
  * Prompt detail level. Controls how much product metadata is sent to
@@ -288,8 +290,4 @@ function formatItemCard(index: number, item: CartItem, cartCurrency: string | nu
   return out
 }
 
-function formatCurrency(amount: number | null, currency: string | null): string {
-  if (amount == null) return 'unknown'
-  const c = currency ? currency + ' ' : ''
-  return `${c}${amount.toFixed(2)}`
-}
+

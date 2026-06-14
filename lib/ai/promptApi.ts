@@ -2,6 +2,7 @@ import type { AIProvider, Cart, ChatMessage, JudgeCallOptions, ProviderStatus, V
 import type { Product } from './types.ts'
 import { parseNaturalVerdict, verdictFromNatural } from './judgeParse.ts'
 import { fallbackVerdict } from './verdictHelpers.ts'
+import { buildCounselSubjectLine, buildCounselOpeningUserPrompt } from './counselUserPrompt.ts'
 
 /**
  * Adapter for Chrome's built-in Prompt API (Gemini Nano).
@@ -149,10 +150,7 @@ export class PromptApiProvider implements AIProvider {
   }
 
   private buildUserPrompt(history: ChatMessage[], product: Product, cart: Cart | null, speaker: 'prosecution' | 'defense'): string {
-    const subjectLine =
-      cart && cart.items.length > 0
-        ? `CART: ${cart.itemCount} items totaling ${formatPrice({ price: cart.total, currency: cart.currency } as any)} on ${product.domain}`
-        : `PRODUCT: ${product.name} (${formatPrice(product)}) on ${product.domain}`
+    const subjectLine = buildCounselSubjectLine(product, cart)
     const transcript = history
       .map((m) => {
         const tag = m.role === 'prosecution' ? 'PROSECUTION' : m.role === 'defense' ? 'DEFENSE' : 'JUDGE'
@@ -162,9 +160,14 @@ export class PromptApiProvider implements AIProvider {
     const turn = history.filter((m) => m.role === speaker).length + 1
     if (speaker === 'prosecution') {
       if (history.length === 0) {
-        return `${subjectLine}\n\nThis is the prosecution's opening statement. Make the case against this purchase. 2-4 sentences.`
+        return buildCounselOpeningUserPrompt(product, cart)
       }
-      return `${subjectLine}\n\nTRANSCRIPT SO FAR:\n${transcript}\n\nThe defense just spoke. Rebut their point and introduce one new angle. This is prosecution turn ${turn}. 2-4 sentences.`
+      return (
+        `${subjectLine}\n\n` +
+        `TRANSCRIPT SO FAR:\n${transcript}\n\n` +
+        `The defense just spoke. Rebut their point and introduce one new angle.\n` +
+        `Name ${product.name} by its title in this turn. Never use "this product", "this item", "this thing", or "the item" as a stand-in — use the title (or its first two words) every turn. This is prosecution turn ${turn}. 2-4 sentences.`
+      )
     }
     return transcript
   }
@@ -216,10 +219,7 @@ export class PromptApiProvider implements AIProvider {
       })
       .join('\n\n')
 
-    const subjectLine =
-      args.cart && args.cart.items.length > 0
-        ? `CART: ${args.cart.itemCount} items totaling ${formatPrice({ price: args.cart.total, currency: args.cart.currency } as any)}`
-        : `PRODUCT: ${args.product.name} (${formatPrice(args.product)})`
+    const subjectLine = buildCounselSubjectLine(args.product, args.cart)
 
     const tail =
       mode === 'natural'
@@ -303,8 +303,3 @@ function tryParseStructured(raw: string): Verdict | null {
   return null
 }
 
-function formatPrice(p: Product): string {
-  if (p.price == null) return 'unknown price'
-  const cur = p.currency ? p.currency + ' ' : ''
-  return `${cur}${p.price.toFixed(2)}`
-}
