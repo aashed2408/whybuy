@@ -43,7 +43,15 @@ interface QueuedItem {
 export class TtsPlayback {
   private ctx: AudioContext | null = null
   private gain: GainNode | null = null
-  private queue: QueuedItem[] = []
+  /**
+   * Each queue entry pairs the original QueuedItem with the
+   * in-flight (or already-completed) fetch+decode promise for that
+   * sentence. The fetch starts IMMEDIATELY in `speak()` rather than
+   * after the previous sentence finishes, so by the time the
+   * drain loop awaits the next buffer the network round-trip +
+   * decode is already done — audio plays back-to-back with no gap.
+   */
+  private queue: Array<{ item: QueuedItem; buf: Promise<AudioBuffer | null> }> = []
   private playing = false
   private currentSource: AudioBufferSourceNode | null = null
   private muted = false
@@ -112,11 +120,15 @@ export class TtsPlayback {
 
   /**
    * Enqueue a sentence for TTS. Returns immediately. The fetch +
-   * decode + play happen asynchronously in order.
+   * decode start RIGHT AWAY (in parallel with the current audio
+   * playing), so by the time the drain loop awaits the next
+   * buffer it's almost always already ready — audio plays
+   * back-to-back with no gap.
    */
   speak(text: string, config: TtsConfig): void {
     if (!text || !text.trim()) return
-    this.queue.push({ text: text.trim(), config })
+    const item: QueuedItem = { text: text.trim(), config }
+    this.queue.push({ item, buf: this.fetchAndDecode(item) })
     void this.drain()
   }
 
@@ -191,9 +203,13 @@ export class TtsPlayback {
           await this.ctx.resume()
         } catch {}
       }
+      // Each entry's fetch+decode promise started in speak(), so by
+      // the time we await it the network round-trip + decode is
+      // already done (in parallel with the previous audio). Audio
+      // plays back-to-back with no gap.
       while (this.queue.length > 0) {
-        const item = this.queue.shift()!
-        const buf = await this.fetchAndDecode(item)
+        const { item, buf: bufPromise } = this.queue.shift()!
+        const buf = await bufPromise
         if (!buf) continue
         this.emitState('playing')
         await this.playBuffer(buf)

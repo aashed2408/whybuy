@@ -372,57 +372,71 @@ test('prosecutionSystemPrompt shows the brand/rating in the subject', () => {
   assert.match(prompt, /47 reviews/)
 })
 
-test('prosecution prompt enforces title naming convention in rich mode', () => {
+test('prosecution prompt: rich mode allows brand/category shorthand, does not require full title every turn', () => {
   const prompt = prosecutionSystemPrompt(sampleProduct, sampleCart, { detail: 'rich' })
-  // Must explicitly forbid generic terms.
-  assert.match(prompt, /this product/i)
-  assert.match(prompt, /the item/i)
-  // Must demand title references in rich mode.
-  assert.match(prompt, /title/i)
-  assert.match(prompt, /first two words/i)
+  // Rich mode still requires the title on first mention.
+  assert.match(prompt, /First mention: use the full product title/i)
+  // But the new rule allows brand, category, or "it" afterward.
+  assert.match(prompt, /mix it up/i)
+  assert.match(prompt, /BRAND/i)
+  assert.match(prompt, /CATEGORY/i)
+  // The old "first two words" shorthand is no longer demanded.
+  assert.doesNotMatch(prompt, /first two words/i)
 })
 
-test('prosecution prompt enforces title naming convention in minimal mode', () => {
+test('prosecution prompt: minimal mode also allows brand/category shorthand', () => {
   const prompt = prosecutionSystemPrompt(sampleProduct, null, { detail: 'minimal' })
-  // Minimal mode still forbids generic terms and requires the model to
-  // refer to the product by title.
-  assert.match(prompt, /this product/i)
-  assert.match(prompt, /title/i)
-  assert.match(prompt, /first two words/i)
+  assert.match(prompt, /First mention: use the full product title/i)
+  assert.match(prompt, /mix it up/i)
+  assert.match(prompt, /BRAND/i)
+  assert.match(prompt, /CATEGORY/i)
+  // Old "first two words" rule is gone in minimal too.
+  assert.doesNotMatch(prompt, /first two words/i)
 })
 
-test('prosecution prompt embeds the product title in the role framing', () => {
-  // The product title is "Premium Wireless Headphones" — the prompt
-  // should weave it into the role block so the model treats it as
-  // identity-level, not optional background.
+test('prosecution prompt names the product in the role framing', () => {
+  // The product title, price, and site must all be present in the
+  // header so the model treats them as identity-level, not optional
+  // background.
   const prompt = prosecutionSystemPrompt(sampleProduct, null, { detail: 'minimal' })
-  assert.match(prompt, /THE PRODUCT ON TRIAL/i)
   assert.match(prompt, /Premium Wireless Headphones/)
   assert.match(prompt, /USD 129\.99/)
   assert.match(prompt, /example\.com/)
-  // The model is told it is arguing against THIS product, not a
-  // generic purchase.
-  assert.match(prompt, /NOT arguing against a generic purchase/i)
-  assert.match(prompt, /You are arguing against Premium Wireless Headphones/i)
+  // The model is told it is arguing about THIS specific thing.
+  assert.match(prompt, /must be about THIS specific thing|not "a purchase" in general/i)
+  assert.match(prompt, /You'?re arguing against Premium Wireless Headphones/i)
 })
 
-test('prosecution prompt requires product title in the first sentence of the opening statement', () => {
-  // The opening-statement rule must include the actual product title
-  // in a template the model can follow.
+test('prosecution prompt: opening statement is conversational, not a courtroom template', () => {
+  // The opening-statement rule must be conversational and forbid
+  // legal/courtroom language.
   const prompt = prosecutionSystemPrompt(sampleProduct, null, { detail: 'minimal' })
   assert.match(prompt, /OPENING STATEMENT/i)
-  // The literal title must appear inside the opening-statement template.
-  assert.match(prompt, /"Ladies and gentlemen of the jury, the matter before the court is the purchase of Premium Wireless Headphones at USD 129\.99 on example\.com/)
-  // The rule that the FIRST sentence must contain the title.
-  assert.match(prompt, /first sentence of your opening statement must contain "Premium Wireless Headphones"/i)
+  // The full "Ladies and gentlemen of the jury" courtroom opener
+  // must NOT be present (it's listed as a forbidden phrase, but
+  // we want to make sure the old template line is gone).
+  assert.doesNotMatch(prompt, /Ladies and gentlemen of the jury/i)
+  // An example conversational opener should be there.
+  assert.match(prompt, /"So you're about to spend.*Premium Wireless Headphones.*Let's talk about whether/i)
+  // The opening should establish cost, category, and ONE reason — not a list.
+  assert.match(prompt, /ONE concrete reason to hesitate/i)
 })
 
-test('prosecution prompt warns the model to replace generic stand-ins with the title', () => {
-  // The model is told to substitute "this product" with the actual
-  // title rather than emitting the generic phrase.
+test('prosecution prompt: tells the model to mix up how it refers to the product', () => {
+  // The new naming rule: use the full title on first mention, then
+  // mix in brand / category / "it" — don't repeat the full title
+  // every turn.
   const prompt = prosecutionSystemPrompt(sampleProduct, null, { detail: 'minimal' })
-  assert.match(prompt, /If you are about to say "this product"/i)
-  assert.match(prompt, /replace it with "Premium Wireless Headphones"/i)
+  assert.match(prompt, /mix it up/i)
+  assert.match(prompt, /BRAND/i)
+  assert.match(prompt, /CATEGORY/i)
+  // Must tell the model "it" / "this" / "that" are fine after the first mention.
+  assert.match(prompt, /"it" \/ "this" \/ "that"/i)
+  // Must forbid saying the full title twice in one turn.
+  assert.match(prompt, /never twice/i)
+  // Must include a wrong-vs-right contrast.
+  assert.match(prompt, /WRONG.*every turn/i)
+  assert.match(prompt, /RIGHT.*natural/i)
 })
 
 test('judge prompt asks the model to name the product in its paragraph', () => {
@@ -449,24 +463,28 @@ test('judge prompt: hard rule against inventing facts', () => {
   const prompt = judgeSystemPrompt(sampleProduct, null, { judgeMode: 'natural' })
   assert.match(prompt, /may ONLY reference what was actually said/i)
   // Must explicitly forbid inventing facts and motivations.
-  assert.match(prompt, /invent facts about the product/i)
-  assert.match(prompt, /assume the user'?s motivations/i)
-  assert.match(prompt, /invent claims the defense never made/i)
-  assert.match(prompt, /fabricate/i)
-  // Must explicitly handle the "I want it" case (empty defense).
-  assert.match(prompt, /I want it.*nothing more/i)
-  // Must explicitly say the user prompt's transcript is the only
-  // evidence the judge can reference.
+  assert.match(prompt, /Invent facts about the product/i)
+  assert.match(prompt, /Assume the user'?s motivations/i)
+  // Must explicitly handle the "I want it" case (it's a want, not a need).
+  assert.match(prompt, /"I want it".*want/i)
+  // Must explicitly say the transcript is the only evidence the
+  // judge can reference.
   assert.match(prompt, /ONLY evidence/i)
+  // Must NOT fabricate — must tell the model what to write when
+  // the user said nothing.
+  assert.match(prompt, /Do NOT fabricate/i)
 })
 
-test('judge prompt: tells the model to quote the user\'s words', () => {
-  // If the user wrote "I want it" verbatim, the judge should be
-  // able to reference that exact phrase rather than paraphrasing
-  // it into something the user never said.
+test('judge prompt: requires the model to evaluate whether the user has demonstrated a need', () => {
+  // The user said: "The judge should analyze better and see if the
+  // user displays an actual need for the product." The new prompt
+  // must require the judge to name the need (or name its absence).
   const prompt = judgeSystemPrompt(sampleProduct, null, { judgeMode: 'natural' })
-  assert.match(prompt, /use their words if possible/i)
-  assert.match(prompt, /quote/i)
+  assert.match(prompt, /demonstrate a real need|did the user demonstrate a real need|articulated a real/i)
+  // Must classify bare "I want it" as a want, not a need.
+  assert.match(prompt, /"I want it".*want.*not a need|with no specifics is a want/i)
+  // Must list specific use cases as needs.
+  assert.match(prompt, /specific use case.*need|use case.*exists today/i)
 })
 
 // === User-prompt must embed the product title (not just the system prompt) ===
@@ -980,7 +998,7 @@ test('describeSubject: single-item cart uses PRODUCT: line, not "A cart with 1 i
   // The "A cart with 1 item" framing must NOT appear.
   assert.doesNotMatch(prompt, /A cart with 1 item/i)
   // The role framing must reference the real product, not "Cart".
-  assert.match(prompt, /the purchase of Louis Vuitton: The Complete Fashion Collections/i)
+  assert.match(prompt, /You'?re arguing against Louis Vuitton: The Complete Fashion Collections/i)
 })
 
 test('describeSubject: single-item cart rich mode uses the cart item details, not product details', () => {
@@ -1384,11 +1402,15 @@ test('prosecutionSystemPrompt({detail:"minimal"}) sends only PRODUCT/PRICE/SITE'
   assert.match(p, /PRODUCT: Premium Wireless Headphones/)
   assert.match(p, /PRICE:\s+USD 129\.99/)
   assert.match(p, /SITE:\s+example\.com/)
-  // Rich-card fields must NOT appear.
-  assert.doesNotMatch(p, /Brand:/)
-  assert.doesNotMatch(p, /Rating:/)
-  assert.doesNotMatch(p, /reviews/)
-  assert.doesNotMatch(p, /Prime:/)
+  // Rich-card fields must NOT appear in the SUBJECT block. We
+  // extract just that block so instructions/examples further down
+  // the prompt (which can mention "Brand" or "reviews" as
+  // rhetorical examples) don't trigger false failures.
+  const subj = p.split('SUBJECT OF THE TRIAL')[1]?.split('YOUR VOICE')[0] ?? ''
+  assert.doesNotMatch(subj, /Brand:/)
+  assert.doesNotMatch(subj, /Rating:/)
+  assert.doesNotMatch(subj, /reviews/)
+  assert.doesNotMatch(subj, /Prime:/)
 })
 
 test('prosecutionSystemPrompt({detail:"rich"}) includes the full product card', () => {
@@ -1935,74 +1957,258 @@ test('Bypass: setBypass preserves existing sites', async () => {
     const cur = await loadBypass()
     assert.deepEqual(cur.sites.sort(), ['amazon.ca', 'ebay.com'])
     // clearBypass removes one site, leaves the other.
-    await clearBypass('amazon.ca')
-    const after = await loadBypass()
-    assert.deepEqual(after.sites, ['ebay.com'])
-  } finally {
-    if (savedStorage) globalThis.chrome.storage.session = savedStorage
-    else delete globalThis.chrome.storage.session
+  await clearBypass('amazon.ca')
+  const after = await loadBypass()
+  assert.deepEqual(after.sites, ['ebay.com'])
+} finally {
+  if (savedStorage) globalThis.chrome.storage.session = savedStorage
+  else delete globalThis.chrome.storage.session
   }
 })
 
-// === Judge prompt: moderate win rate (no default to restraint) ===
+// === TtsPlayback: prefetch eliminates the gap between sentences ===
 //
-// Bug: the previous judge prompt said "Empty defenses lose to
-// non-empty prosecutions by default" and "If neither side is
-// compelling, default to 'I rule in favor of restraint.' A cautious
-// ruling is better than a false positive." This made "I want it"
-// alone always lose. The user wanted a moderate win rate (~50%) when
-// the defense is bare "I want it", so the prompt now:
-//   - Tells the judge the user is an adult with autonomy
-//   - Removes the "default to restraint" rule
-//   - Adds "If both sides are equally weak, lean in favor of the
-//     purchase. The user gets the benefit of the doubt, not the
-//     prosecution."
-//   - Adds "If the prosecution's case is generic and the defense is
-//     'I want it' alone, rule in favor of the purchase"
+// Bug: in the previous design, sentence N+1's ElevenLabs fetch
+// started AFTER sentence N finished playing. With ~500ms-1s of
+// network latency per fetch, this put a noticeable gap between
+// every pair of sentences, so the TTS lagged behind the typing
+// text by several seconds at the end of a turn.
+//
+// Fix: the playback now prefetches and decodes sentence N+1
+// while sentence N is playing. When N ends, N+1 is already
+// decoded and starts immediately — no gap.
 
-test('judge prompt: no longer defaults to restraint when both sides are weak', () => {
+test('TtsPlayback: prefetches the next sentence while the current one is playing (no gap)', async () => {
+  const savedAudioContext = globalThis.AudioContext
+  const savedFetch = globalThis.fetch
+
+  // Track per-source timing: when each source.start() was called
+  // relative to the previous source's onended. With the prefetch
+  // fix, the gap should be ~0ms (start as soon as the previous
+  // ends). Without the fix, the gap is ~fetch+decode time
+  // (typically 50-200ms in this test mock).
+  const sourceEndTimes = []
+  const sourceStartTimes = []
+  const FETCH_LATENCY_MS = 80 // simulate ElevenLabs network latency
+
+  const mockCtx = {
+    state: 'running',
+    destination: {},
+    createGain() {
+      return { gain: { value: 1 }, connect() {} }
+    },
+    createBufferSource() {
+      const src = {
+        buffer: null,
+        connect() {},
+        onended: null,
+        start() {
+          sourceStartTimes.push(Date.now())
+          // Each "audio" plays for 100ms. The prefetch should make
+          // the next source.start() fire ~0ms after this one ends.
+          setTimeout(() => {
+            if (src.ended) return
+            src.ended = true
+            sourceEndTimes.push(Date.now())
+            if (src.onended) src.onended()
+          }, 100)
+        },
+        stop() {
+          if (src.ended) return
+          src.ended = true
+          sourceEndTimes.push(Date.now())
+          if (src.onended) src.onended()
+        },
+        ended: false,
+      }
+      return src
+    },
+    async decodeAudioData(_buf) {
+      // Decode is also slow in real browsers; the prefetch fix
+      // makes the next decode happen BEFORE the current audio
+      // finishes, so it should be ready by the time we need it.
+      await new Promise((r) => setTimeout(r, 30))
+      return { duration: 0.1 }
+    },
+    async resume() {
+      this.state = 'running'
+    },
+    async close() {},
+  }
+
+  globalThis.AudioContext = function () {
+    return mockCtx
+  }
+  globalThis.fetch = async () => {
+    await new Promise((r) => setTimeout(r, FETCH_LATENCY_MS))
+    return {
+      ok: true,
+      status: 200,
+      arrayBuffer: async () => new ArrayBuffer(8),
+    }
+  }
+
+  try {
+    const pb = new TtsPlayback()
+    pb.start()
+
+    // Queue 4 sentences back-to-back, then wait for them all to play.
+    for (let i = 0; i < 4; i++) {
+      pb.speak(`Sentence ${i}.`, { apiKey: 'sk_test', voiceId: 'test_voice' })
+    }
+    await new Promise((r) => setTimeout(r, 2000))
+
+    // Assert: all 4 sources played.
+    assert.equal(sourceStartTimes.length, 4, 'all 4 sources should have played')
+    assert.equal(sourceEndTimes.length, 4, 'all 4 sources should have ended')
+
+    // Assert: the gap between each source's end and the next
+    // source's start is < 50ms (close to zero — the prefetch
+    // fetch+decode happened during the previous source's playback).
+    // Without the prefetch fix, the gap would be ~110ms (fetch 80ms
+    // + decode 30ms). 50ms is a safe threshold that catches a
+    // regression but allows for test-flakiness.
+    for (let i = 1; i < 4; i++) {
+      const gap = sourceStartTimes[i] - sourceEndTimes[i - 1]
+      assert.ok(
+        gap < 50,
+        `Gap between sentence ${i - 1} end and sentence ${i} start was ${gap}ms (expected < 50ms). ` +
+          `A large gap means the next sentence's fetch+decode happened AFTER the previous one finished playing, ` +
+          `which is the lag bug the prefetch fix was meant to eliminate.`,
+      )
+    }
+  } finally {
+    if (savedAudioContext) globalThis.AudioContext = savedAudioContext
+    else delete globalThis.AudioContext
+    if (savedFetch) globalThis.fetch = savedFetch
+  }
+})
+
+// === Judge prompt: focus on real need, not "adult autonomy" boilerplate ===
+//
+// Bug: the previous judge prompt treated "I want it" as roughly
+// equivalent to a specific use case (both were "low-information"
+// positions). The user pointed out that "I want it" is a want, not
+// a need, and the judge should require a real, specific need before
+// ruling in favor of the purchase. The new prompt:
+//   - Asks the central question: did the user demonstrate a real,
+//     specific need? (Not "did the prosecution make a strong case?")
+//   - Lists what counts as a need (specific use case, problem the
+//     product solves, replacement for something broken) vs a want
+//     ("I want it", "it'd be nice", "on sale")
+//   - Removes the "adult autonomy" boilerplate — autonomy is not
+//     justification on its own
+//   - Default to restraint when the user only said "I want it"
+
+test('judge prompt: a want is explicitly NOT a need', () => {
   const p = judgeSystemPrompt(product, null, { judgeMode: 'natural' })
+  assert.match(p, /WANT IS NOT A NEED|want is not a need/i)
+  // "I want it" alone must be classified as a want, not a need.
+  assert.match(p, /"I want it".*want.*not a need|"I want it" is a want/i)
+  // The model must be told that a single "I want it" loses by default.
+  assert.match(p, /"I want it".*loses by default|with no specifics is a want/i)
+})
+
+test('judge prompt: lists specific use cases as needs', () => {
+  const p = judgeSystemPrompt(product, null, { judgeMode: 'natural' })
+  assert.match(p, /specific.*concrete use case|concrete use case.*today/i)
+  // Examples of needs must be present.
+  assert.match(p, /my current one broke|current one broke/i)
+  assert.match(p, /work from coffee shops|run 30 miles/i)
+})
+
+test('judge prompt: removes the "default to restraint" boilerplate and replaces with need-based ruling', () => {
+  const p = judgeSystemPrompt(product, null, { judgeMode: 'natural' })
+  // The previous default-to-restraint rule is gone.
   assert.doesNotMatch(p, /If neither side is compelling, default to "I rule in favor of restraint"/i)
   assert.doesNotMatch(p, /A cautious ruling is better than a false positive/i)
-  assert.doesNotMatch(p, /Empty defenses lose to non-empty prosecutions by default/i)
+  // The new default-to-restraint rule is in (only when no need is shown).
+  assert.match(p, /has not demonstrated a need.*restraint|did not demonstrate a real need/i)
 })
 
-test('judge prompt: explicitly leans in favor of the purchase when arguments are equally weak', () => {
-  const p = judgeSystemPrompt(product, null, { judgeMode: 'natural' })
-  assert.match(p, /equally weak.*purchase|benefit of the doubt/i)
-  assert.match(p, /generic.*purchase|generic skepticism.*autonomy/i)
-})
-
-test('judge prompt: tells the model the user is an adult with autonomy', () => {
-  const p = judgeSystemPrompt(product, null, { judgeMode: 'natural' })
-  assert.match(p, /adult.*autonomy|autonomy over their own spending/i)
-  assert.match(p, /burden of persuasion is on the prosecution|burden.*prosecution/i)
-})
-
-// === Prosecution prompt: no deferral ("I will demonstrate" without content) ===
+// === Prosecution prompt: conversational, not legal; brand/category shorthand ===
 //
-// Bug: the prosecution was generating sentences like "the prosecution
-// will demonstrate that…" or "next, I will argue…" without ever
-// delivering the actual argument. The user heard "I will now show
-// that this product is overpriced" and then the turn ended. The
-// prompt now has a NO DEFERRAL section that forbids preambles and
-// requires the actual argument in every sentence.
+// Bug: the prosecution was talking like a courtroom lawyer ("Ladies
+// and gentlemen of the jury", "the prosecution will demonstrate"),
+// using the full product title every turn, and promising arguments
+// it never delivered. The new prompt:
+//   - Speaks conversationally (kitchen-table debate, not courtroom)
+//   - Forbids ALL legal vocabulary: "the prosecution", "the defense",
+//     "the court", "your honor", "I move to", "we will demonstrate",
+//     "I will show", "I will present evidence", "in my next point",
+//     "I will now argue", "ladies and gentlemen", etc.
+//   - Allows the model to refer to the product by brand, category,
+//     or "it" after the first mention (instead of repeating the
+//     full title every turn)
+//   - Reinforces "no deferral": every sentence must be a complete
+//     argument, never a promise of one
 
-test('prosecution prompt: forbids "I will demonstrate" / "next, I will" / "in my next point" without content', () => {
+test('prosecution prompt: is conversational, not legal', () => {
   const p = prosecutionSystemPrompt(product, null)
-  assert.match(p, /NO DEFERRAL|never promise an argument without immediately delivering|do not write sentences like/i)
-  assert.match(p, /I will demonstrate|next, I will show|will now argue/i)
-  // The prompt must tell the model to delete the preamble and state the argument directly.
+  // Conversational framing.
+  assert.match(p, /conversational|at the kitchen table|kitchen table/i)
+  // All forbidden legal terms must be listed.
+  assert.match(p, /NO courtroom language/i)
+  for (const term of [
+    'the prosecution',
+    'the defense',
+    'the court',
+    'your honor',
+    'I move to',
+    'we will demonstrate',
+    'I will show',
+    'I will present evidence',
+    'in my next point',
+    'I will now argue',
+    'to summarize what I will show',
+    'the record shows',
+    'ladies and gentlemen',
+  ]) {
+    assert.match(p, new RegExp(term.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&'), 'i'), `forbids "${term}"`)
+  }
+  // Must NOT contain the old "Ladies and gentlemen of the jury" opener.
+  assert.doesNotMatch(p, /Ladies and gentlemen of the jury/i)
+})
+
+test('prosecution prompt: allows brand, category, or "it" instead of the full title every turn', () => {
+  const p = prosecutionSystemPrompt(product, null)
+  assert.match(p, /BRAND|brand.*recognizable|brand name/i)
+  assert.match(p, /CATEGORY|category.*hub|category.*mouse/i)
+  // The prompt must tell the model NOT to repeat the full title.
+  assert.match(p, /sick of hearing the full title|never twice|short reminder.*once per turn/i)
+  // Must include a concrete contrast (WRONG vs RIGHT).
+  assert.match(p, /WRONG.*every turn|RIGHT.*natural|WRONG.*RIGHT/i)
+})
+
+test('prosecution prompt: forbids "I will demonstrate" / "next, I will" / "I move to present evidence"', () => {
+  const p = prosecutionSystemPrompt(product, null)
+  assert.match(p, /NO DEFERRAL|never promise an argument without immediately delivering/i)
+  // The forbidden phrases must all be listed in the prompt.
+  for (const term of [
+    'we will demonstrate',
+    'we will show',
+    'I will now argue',
+    'next, I will',
+    'in my following point',
+    'to summarize what I am about to show',
+    'the court will hear shortly',
+    'I move to present evidence',
+  ]) {
+    assert.match(p, new RegExp(term.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&'), 'i'), `forbids "${term}"`)
+  }
+  // The model must be told to delete the preamble.
   assert.match(p, /DELETE the preamble|state the actual argument directly/i)
-  // Must forbid summary-of-points-to-come phrasings.
-  assert.match(p, /list of points you|have shown|will show|have not yet shown/i)
-  // The opening statement template's "demonstrate that…" must be followed by an actual claim.
-  assert.match(p, /MUST be followed by the actual demonstrative claim/i)
 })
 
 test('prosecution prompt: tells the model to ground arguments in real-world knowledge of the product category', () => {
   const p = prosecutionSystemPrompt(product, null)
   assert.match(p, /real-world knowledge|typical pricing|common alternatives|known issues|expected lifespan/i)
-  // Must prefer specific numbers over generic phrasing.
   assert.match(p, /specific numbers|cite specific numbers/i)
+})
+
+test('prosecution prompt: includes a category alias for natural references', () => {
+  // The "WHAT YOU CAN CALL THE THING" section should include a
+  // brand, category, or "this"/"it" for the model to fall back on.
+  const p = prosecutionSystemPrompt(product, null)
+  assert.match(p, /"it"|"this"|"that"/i)
 })
