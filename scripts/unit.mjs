@@ -1598,6 +1598,84 @@ test('SentenceBuffer: handles the judge paragraph shape', () => {
   assert.equal(b.push('I rule in favor of restraint.'), 'I rule in favor of restraint.')
 })
 
+// === SentenceBuffer: handles full-text re-emit (the real AI streaming shape) ===
+//
+// The AI provider's `onChunk(acc)` callback gives the FULL accumulated
+// text on every delta, not the new tail. So if the AI streams "I",
+// "I want", "I want it.", the buffer gets called with all three in
+// order. Without correction, the buffer accumulates them as
+// "II wantI want it." — the entire text re-pasted on every chunk.
+// The user hears the same sentence repeated with progressively more
+// garbled text.
+//
+// Fix: the buffer remembers the last chunk it saw, and if the new
+// chunk is a strict superstring of the old one, only the new tail
+// is appended. This makes the buffer work correctly for both true
+// deltas AND full-text re-emits.
+
+test('SentenceBuffer: handles AI onChunk(full-text) without doubling the text', () => {
+  const b = new SentenceBuffer()
+  // Simulate the AI's onChunk(acc) pattern: each push is the FULL
+  // accumulated text up to that point.
+  assert.equal(b.push('I'), null)
+  assert.equal(b.push('I want'), null)
+  // The third push completes the sentence. The buffer must return
+  // exactly "I want it." — NOT "II wantI want it." or any other
+  // doubled-up text.
+  assert.equal(b.push('I want it.'), 'I want it.')
+  assert.equal(b.length, 0, 'Buffer should be empty after the sentence is emitted')
+})
+
+test('SentenceBuffer: full-text re-emit for multiple sentences', () => {
+  const b = new SentenceBuffer()
+  // Simulate the AI streaming two sentences, each full-text re-emitted.
+  // chunk 1: "The court notes"
+  // chunk 2: "The court notes the cost."
+  // chunk 3: "The court notes the cost. The defense"
+  // chunk 4: "The court notes the cost. The defense argues need."
+  // The buffer must emit each sentence exactly once.
+  const emitted = []
+  let s = b.push('The court notes')
+  if (s) emitted.push(s)
+  s = b.push('The court notes the cost.')
+  if (s) emitted.push(s)
+  s = b.push('The court notes the cost. The defense')
+  if (s) emitted.push(s)
+  s = b.push('The court notes the cost. The defense argues need.')
+  if (s) emitted.push(s)
+  assert.deepEqual(emitted, ['The court notes the cost.', 'The defense argues need.'])
+})
+
+test('SentenceBuffer: identical re-send is a no-op', () => {
+  // Some retry paths re-emit the exact same chunk twice. The buffer
+  // must NOT double the text.
+  const b = new SentenceBuffer()
+  assert.equal(b.push('Hello world.'), 'Hello world.')
+  // Same chunk re-sent: should return null (nothing new) and leave
+  // the buffer empty.
+  assert.equal(b.push('Hello world.'), null)
+  assert.equal(b.length, 0)
+})
+
+test('SentenceBuffer: true deltas still work (no regression on the old behavior)', () => {
+  // The original behavior — push deltas, accumulate, emit on terminator.
+  const b = new SentenceBuffer()
+  assert.equal(b.push('I'), null)
+  assert.equal(b.push(' want'), null)
+  assert.equal(b.push(' it.'), 'I want it.')
+})
+
+test('SentenceBuffer: flush resets lastChunk so a new turn starts clean', () => {
+  const b = new SentenceBuffer()
+  b.push('I want it.')
+  // After flush, lastChunk must be reset. The next turn's text
+  // should NOT be treated as a full-text re-emit of the previous
+  // turn's text.
+  b.flush()
+  const emitted = b.push('New turn.')
+  assert.equal(emitted, 'New turn.')
+})
+
 // === TtsPlayback race-condition regression test ===
 //
 // Bug: speak() calls arriving in the same tick used to produce

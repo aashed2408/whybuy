@@ -8,6 +8,15 @@
  * whenever we see a clean terminator (`.`, `!`, `?`) followed by
  * whitespace, end-of-stream, or a closing quote/paren.
  *
+ * IMPORTANT: the AI provider's `onChunk(acc)` callback gives the
+ * FULL accumulated text on every delta (not just the new tail).
+ * Without correction, pushing "I", "I want", "I want it." would
+ * leave the buffer as "II wantI want it." — the whole text
+ * re-pasted on every chunk. To handle that, this buffer remembers
+ * the last chunk it saw and, if the new chunk is a strict
+ * superstring of the old one, only the new tail is appended.
+ * This works correctly for both true deltas and full-text re-emits.
+ *
  * Abbreviation handling: a period that's part of an abbreviation
  * (e.g. "U.S.A.", "U.K.", "e.g.") is followed by another capital
  * letter and another period within a few chars. We look at the 4
@@ -31,6 +40,14 @@ export class SentenceBuffer {
   private buf = ''
   /** Max chars to hold before forcing a flush. */
   private readonly maxBuffer: number
+  /**
+   * The last chunk we received in full. Used to detect "full-text
+   * re-emit" events where the new chunk contains the old one as
+   * a prefix (e.g. `onChunk(acc)` from the AI provider). When we
+   * see that pattern, we extract only the new tail and append it,
+   * so the buffer doesn't double up.
+   */
+  private lastChunk = ''
 
   constructor(opts: { maxBufferChars?: number } = {}) {
     this.maxBuffer = opts.maxBufferChars ?? 200
@@ -39,10 +56,34 @@ export class SentenceBuffer {
   /**
    * Push a text chunk (may be empty). Returns a complete sentence
    * if one terminated in this push, else null.
+   *
+   * Accepts BOTH true deltas (" want" following "I") and full-text
+   * re-emits ("I want" following "I"). The buffer detects which
+   * kind of input it got and only appends the new content.
    */
   push(chunk: string): string | null {
     if (!chunk) return null
-    this.buf += chunk
+
+    let delta: string
+    if (this.lastChunk && chunk === this.lastChunk) {
+      // Identical chunk re-sent (e.g. duplicate event from a retry).
+      // Nothing new to process.
+      return null
+    } else if (
+      this.lastChunk &&
+      chunk.length > this.lastChunk.length &&
+      chunk.startsWith(this.lastChunk)
+    ) {
+      // Full-text re-emit: the new chunk contains the old one as a
+      // prefix. Only the new tail is genuinely new content.
+      delta = chunk.slice(this.lastChunk.length)
+    } else {
+      // True delta input (or first call / reset between turns).
+      delta = chunk
+    }
+    this.lastChunk = chunk
+    if (!delta) return null
+    this.buf += delta
     return this.tryExtract()
   }
 
@@ -53,6 +94,7 @@ export class SentenceBuffer {
   flush(): string {
     const rest = this.buf.trim()
     this.buf = ''
+    this.lastChunk = ''
     return rest
   }
 
