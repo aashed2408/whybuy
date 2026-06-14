@@ -162,11 +162,23 @@ export class PromptApiProvider implements AIProvider {
       if (history.length === 0) {
         return buildCounselOpeningUserPrompt(product, cart)
       }
+      // Category-first, not title-every-turn. Mirrors
+      // buildCounselRebuttalUserPrompt in counselUserPrompt.ts —
+      // duplicated here because the Chrome on-device path doesn't
+      // reuse that builder (it composes the user message from the
+      // transcript + a per-turn instruction string). The previous
+      // version of this rule told the model to "use the title (or
+      // its first two words) every turn", which produced robotic,
+      // repetitive output. The user wanted the CATEGORY word.
       return (
         `${subjectLine}\n\n` +
         `TRANSCRIPT SO FAR:\n${transcript}\n\n` +
         `The defense just spoke. Rebut their point and introduce one new angle.\n` +
-        `Name ${product.name} by its title in this turn. Never use "this product", "this item", "this thing", or "the item" as a stand-in — use the title (or its first two words) every turn. This is prosecution turn ${turn}. 2-4 sentences.`
+        `- Call the thing by its CATEGORY ("shoes" / "the hub" / "the mouse" / "headphones" / etc.), NOT the full brand+model title. The user is sick of hearing the full title repeated every turn.\n` +
+        `- After the first mention in this turn, "it" / "this" / "that" is fine.\n` +
+        `- Brand is a rare exception. For most products, NEVER mention the brand at all in this turn.\n` +
+        `- 2 to 3 sentences. Punchy. This is prosecution turn ${turn}.\n` +
+        `- NEVER use courtroom language. NEVER use "this product" / "this item" / "the item" / "this thing" as a noun. Say the category word, or "it".`
       )
     }
     return transcript

@@ -515,26 +515,86 @@ test('judge prompt: requires the model to evaluate whether the user has demonstr
 
 import { buildCounselSubjectLine, buildCounselOpeningUserPrompt, buildCounselRebuttalUserPrompt } from '../lib/ai/counselUserPrompt.ts'
 
-test('counsel opening user-prompt embeds the product title and a strict opener', () => {
+test('counsel opening user-prompt is category-first, conversational, no courtroom framing', () => {
   const out = buildCounselOpeningUserPrompt(sampleProduct, null)
-  // Title must appear in the user message itself, not just the system prompt.
+  // Title still appears in the subject line (for model awareness).
   assert.match(out, /PRODUCT: Premium Wireless Headphones/)
   assert.match(out, /USD 129\.99/)
   assert.match(out, /example\.com/)
-  // Strict opener must include the title verbatim.
-  assert.match(out, /purchase of Premium Wireless Headphones at USD 129\.99 on example\.com/)
-  // The "first sentence must contain" rule is in the user prompt.
-  assert.match(out, /FIRST sentence must contain the exact product title "Premium Wireless Headphones"/i)
-  // The "never use" ban list is present.
-  assert.match(out, /Never use "this product", "this item"/i)
+  // The new rule: open by naming the CATEGORY, not the full title.
+  assert.match(out, /Open by naming the CATEGORY of the thing/i)
+  // Must allow the full title once at most.
+  assert.match(out, /Name the full product title ONCE at most in this turn/i)
+  // Brand is rare / optional.
+  assert.match(out, /Brand is a rare exception/i)
+  // The "never use this product" ban list is present (flipped from
+  // "must contain title" to "never use 'this product' as a stand-in").
+  assert.match(out, /NEVER use "this product" \/ "this item" \/ "the item" \/ "this thing"/i)
+  // The example shape uses the CATEGORY word ("headphones"), not the
+  // full title, and the price is inline.
+  assert.match(out, /So you're about to spend USD 129\.99 on headphones/i)
 })
 
-test('counsel rebuttal user-prompt still requires the product title', () => {
+test('counsel opening user-prompt: regression guard — old "Ladies and gentlemen" template is gone', () => {
+  // The previous opening had a hardcoded template:
+  //   "Ladies and gentlemen of the jury, the matter before the court
+  //    is the purchase of ${title} at ${priceStr} on ${product.domain},
+  //    and the prosecution will demonstrate that…"
+  // The user explicitly objected to courtroom language. This test
+  // fails if anyone re-adds that TEMPLATE. (Note: the new prompt
+  // DOES list "Ladies and gentlemen of the jury" inside a
+  // negative-list of forbidden phrases — that's correct and is not
+  // what this test is guarding against. We check for the old
+  // template's specific phrasing, not the bare phrase.)
+  const out = buildCounselOpeningUserPrompt(sampleProduct, null)
+  // The old opener all together (must NOT appear).
+  assert.doesNotMatch(
+    out,
+    /Ladies and gentlemen of the jury, the matter before the court/i,
+    'old "Ladies and gentlemen ... matter before the court" template is gone',
+  )
+  // "we will demonstrate" as a hardcoded opener (not just a
+  // forbidden-phrase list entry).
+  assert.doesNotMatch(out, /the prosecution will demonstrate that/i)
+  // "court rejects the opening" — old template's threat text.
+  assert.doesNotMatch(out, /court rejects the opening/i)
+  // "FIRST sentence must contain the exact product title" — old rule.
+  assert.doesNotMatch(out, /FIRST sentence must contain the exact product title/i)
+  // The new opening should mention "Ladies and gentlemen" ONLY inside
+  // the "NEVER say:" ban list, not as a positive instruction.
+  const ladiesMatches = out.match(/Ladies and gentlemen/gi) || []
+  for (const match of ladiesMatches) {
+    // Allow it only in the "NEVER say:" line.
+    const idx = out.indexOf(match)
+    const around = out.slice(Math.max(0, idx - 30), idx + 30)
+    assert.match(around, /NEVER say:|forbidden/i, '"Ladies and gentlemen" only allowed inside the NEVER-say list')
+  }
+})
+
+test('counsel rebuttal user-prompt is category-first (not "use title every turn")', () => {
   const out = buildCounselRebuttalUserPrompt(sampleProduct, null, 2)
   assert.match(out, /PRODUCT: Premium Wireless Headphones/)
-  assert.match(out, /Name Premium Wireless Headphones by its title/i)
-  assert.match(out, /Never use "this product", "this item"/i)
+  // The new rule: use the CATEGORY, NOT the full title every turn.
+  assert.match(out, /Call the thing by its CATEGORY/i)
+  // The "use the title every turn" rule from the previous version
+  // must NOT be present.
+  assert.doesNotMatch(out, /Name Premium Wireless Headphones by its title/i)
+  assert.doesNotMatch(out, /use the title \(or its first two words\) every turn/i)
+  assert.doesNotMatch(out, /first two words/i)
+  // The "never use this product" ban list is still there.
+  assert.match(out, /NEVER use "this product" \/ "this item" \/ "the item" \/ "this thing"/i)
+  // The turn counter is preserved.
   assert.match(out, /prosecution turn 2/i)
+})
+
+test('counsel rebuttal user-prompt: regression guard — no courtroom language, no title-every-turn', () => {
+  const out = buildCounselRebuttalUserPrompt(sampleProduct, null, 3)
+  assert.doesNotMatch(out, /Ladies and gentlemen/i)
+  assert.doesNotMatch(out, /the court/i)
+  assert.doesNotMatch(out, /your honor/i)
+  assert.doesNotMatch(out, /the prosecution will demonstrate/i)
+  assert.doesNotMatch(out, /Name .* by its title in this turn/i)
+  assert.doesNotMatch(out, /use the title .* every turn/i)
 })
 
 test('counsel cart user-prompt names the first item, not the page h1', () => {
@@ -547,16 +607,20 @@ test('counsel cart user-prompt names the first item, not the page h1', () => {
   assert.doesNotMatch(out, /^PRODUCT:/m)
 })
 
-test('counsel opening user-prompt on a cart names the first item, not "this product"', () => {
+test('counsel opening user-prompt on a cart: category-first, no per-cart strict template', () => {
   const out = buildCounselOpeningUserPrompt(sampleProduct, sampleCart)
-  // The pre-primed opener uses the first cart item, not the page
-  // h1 ("Shopping Cart" / "Cart" / product.name).
+  // Subject line still uses the first cart item (so the model knows
+  // what cart we're talking about).
   assert.match(out, /CART: Headphones \+ 1 other item/)
-  assert.match(out, /the purchase of Headphones at USD 169\.97 on example\.com/)
-  // First sentence must contain the first item's title.
-  assert.match(out, /FIRST sentence must contain the exact product title "Headphones"/i)
-  // The "never use the cart as a stand-in" rule.
-  assert.match(out, /"the cart"/i)
+  // The new rule: category-first, not the literal full-title-in-sentence-1.
+  assert.match(out, /Open by naming the CATEGORY of the thing/i)
+  // The example uses the CATEGORY word (not the full title).
+  assert.match(out, /So you're about to spend USD 169\.97 on headphones/i)
+  // The old per-cart "purchase of X" hardcoded opener is gone.
+  assert.doesNotMatch(out, /the purchase of Headphones at USD 169\.97 on example\.com/i)
+  // The old "Ladies and gentlemen ... matter before the court"
+  // template (cart or otherwise) is gone.
+  assert.doesNotMatch(out, /Ladies and gentlemen of the jury, the matter before the court/i)
 })
 
 test('single-item cart is treated as a single product (PRODUCT: line, not CART: line)', () => {
@@ -579,13 +643,17 @@ test('single-item cart is treated as a single product (PRODUCT: line, not CART: 
   // Not the bogus "CART: 1 items" format from the old code.
   assert.doesNotMatch(subject, /CART: /)
 
-  // And the opening user-prompt uses the cart item's name, not "Cart".
+  // And the opening user-prompt uses the cart item's name in the
+  // subject line, NOT the old "the purchase of X" hardcoded opener.
   const opening = buildCounselOpeningUserPrompt(pageLevelProduct, singleCart)
   assert.match(opening, /PRODUCT: Louis Vuitton: The Complete Fashion Collections/)
-  assert.match(opening, /the purchase of Louis Vuitton: The Complete Fashion Collections at USD 96\.33 on example\.com/)
-  assert.match(opening, /FIRST sentence must contain the exact product title "Louis Vuitton: The Complete Fashion Collections"/i)
+  assert.match(opening, /Open by naming the CATEGORY of the thing/i)
+  // Old hardcoded opener is gone.
+  assert.doesNotMatch(opening, /the purchase of Louis Vuitton: The Complete Fashion Collections at USD 96\.33 on example\.com/i)
+  // No courtroom language (the old hardcoded opener template).
+  assert.doesNotMatch(opening, /Ladies and gentlemen of the jury, the matter before the court/i)
   // "the cart" is on the ban list.
-  assert.match(opening, /"the cart"/i)
+  assert.doesNotMatch(opening, /"the cart"/i)
 })
 
 // === Per-product-group cooldown fingerprinting ===
