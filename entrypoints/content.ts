@@ -145,6 +145,20 @@ async function openTrial(args: {
     onOverride: (verdict) => {
       if (epoch !== trialEpoch) return
       void recordOutcome(product, cart, verdict, true, [])
+      // Override means the user is going through despite the
+      // verdict. The previous behavior was to dump the user back on
+      // the cart page with no navigation, which then re-triggered
+      // the trial on the next click (infinite loop). Fix: close the
+      // trial AND re-dispatch the original "Proceed to checkout"
+      // click so the user actually goes to checkout.
+      const c = activeController
+      activeController = null
+      c?.close()
+      if (source === 'click' && event) {
+        reDispatch(event, product)
+      } else {
+        log('Override from URL-triggered trial for', product.name)
+      }
     },
     onClose: () => {
       if (epoch !== trialEpoch) return
@@ -217,7 +231,10 @@ async function recordOutcome(
   transcript: any[],
 ): Promise<void> {
   try {
-    if (verdict.decision === 'abandon') {
+    // Cooldown only fires when the user *accepted* an abandon ruling.
+    // An override is the user going through anyway — no cooldown
+    // (otherwise the next page load would also block them).
+    if (verdict.decision === 'abandon' && !overridden) {
       await setCooldown(product, cart, verdict.confidence)
     }
     await appendHistory({

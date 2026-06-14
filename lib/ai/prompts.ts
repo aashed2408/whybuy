@@ -17,14 +17,14 @@ export { formatCurrency } from './promptsHelpers.ts'
 export type PromptDetail = 'minimal' | 'rich'
 
 /**
- * Judge output mode. Controls the shape of the judge's verdict.
+ * Judge output mode.
  *
- *   - `'natural'` (default): line-based ruling
- *     (DECISION/CONFIDENCE/REASONING/SUMMARY/FACTORS). Works on every
- *     model, including non-reasoning ones like `ministral-3:8b`.
- *   - `'structured'`: `<think>...</think>` analysis followed by a
- *     strict JSON verdict. Best on reasoning models like
- *     `gpt-oss:20b` or `kimi-k2-thinking`.
+ * Both modes now produce the same output shape: a free-form
+ * paragraph weighing the two arguments, ending with either
+ * "I rule in favor of the purchase." or "I rule in favor of
+ * restraint.". The option is kept for backwards compatibility
+ * with stored settings — there is no longer a difference in
+ * the underlying prompt.
  */
 export type JudgeMode = 'natural' | 'structured'
 
@@ -131,32 +131,24 @@ DEBATE RULES
  *     reasoning models.
  */
 export function judgeSystemPrompt(product: Product, cart: Cart | null, opts: JudgePromptOptions = {}): string {
-  const judgeMode: JudgeMode = opts.judgeMode === 'structured' ? 'structured' : 'natural'
+  // Both 'natural' and 'structured' judge modes now produce the
+  // same output: a free-form paragraph + an "I rule in favor of
+  // the purchase" or "I rule in favor of restraint" ending line.
+  // The structured mode used to require a <think>...</think> block
+  // + JSON, which small / non-reasoning models couldn't follow and
+  // reasoning models wasted their tokens on. Keeping the option
+  // for backwards compatibility with stored settings.
   const subject = describeSubject(product, cart, 'minimal')
-  if (judgeMode === 'natural') {
-    return naturalJudgePrompt(subject)
-  }
-  // For the structured judge, use the cart item's product details when
-  // there's a single-item cart (so the rich card shows the cart item's
-  // brand/rating/prime rather than a generic product page's).
-  if (cart && cart.items.length === 1) {
-    const item = cart.items[0]
-    return structuredJudgePromptFromItem(item, product, cart, subject)
-  }
-  return structuredJudgePrompt(product, cart, subject)
+  return naturalJudgePrompt(subject)
 }
 
 /**
- * Variant of the structured judge prompt that pulls brand/rating/etc.
- * from a cart item instead of the product. Used for single-item carts
- * where the product is really just the cart item.
+ * (Legacy) structured judge prompt. Now an alias for the natural
+ * prompt — see `judgeSystemPrompt` for the rationale. Kept for
+ * backwards compatibility with anything that imported the symbol.
  */
-function structuredJudgePromptFromItem(item: import('./types.ts').CartItem, product: Product, cart: Cart, subject: string): string {
-  return structuredJudgePromptWithItem(item, product, cart, subject)
-}
-
 function structuredJudgePrompt(product: Product, cart: Cart | null, subject: string): string {
-  return structuredJudgePromptWithItem(null, product, cart, subject)
+  return naturalJudgePrompt(subject)
 }
 
 function naturalJudgePrompt(subject: string): string {
@@ -165,101 +157,43 @@ function naturalJudgePrompt(subject: string): string {
 SUBJECT OF THE TRIAL
 ${subject}
 
+YOUR ROLE
+You are neutral. You have no opinion on the product itself, on the user, or on whether they "should" buy. You base your ruling ONLY on the strength of the two arguments the prosecution and the defense actually made. The prosecution argues against the purchase; the defense argues for it. Whoever made the stronger case wins.
+
+You are not moralizing. You are not giving financial advice. You are weighing two arguments on the record.
+
 INSTRUCTIONS
-You have read the entire transcript below. Weigh the prosecution's case against the defense's case. Consider the product's price, common alternatives, and the user's likely use case.
+You have read the entire transcript of the prosecution's and defense's arguments. Write a single paragraph (3-5 sentences) weighing both sides:
+- Name the product (by its title) and the price.
+- State the prosecution's strongest argument in one sentence.
+- State the defense's strongest argument in one sentence.
+- Say which side made the better case, and why, in 1-2 sentences.
 
-Write your ruling as plain text, in this EXACT order, with NO prose before or after the ruling:
+The user sees this paragraph live as you write it.
 
-DECISION: <proceed or abandon>
-CONFIDENCE: <0.00-1.00, two decimals>
-REASONING: <2-4 sentences explaining how the prosecution's and defense's cases weighed; name the product by its title in at least one sentence. The user sees this line live as you write it.>
-SUMMARY: <1-2 sentence plain-English ruling; this is the headline of the verdict card; name the product by its title in the summary.>
-FACTORS: <factor 1> | <factor 2> | <factor 3>
+End your paragraph with EXACTLY one of these two lines, on its own line, with nothing after it:
+
+I rule in favor of the purchase.
+I rule in favor of restraint.
 
 Rules:
-- "proceed" = the user made a compelling case that the purchase is reasonable.
-- "abandon" = the case against the purchase is stronger, or the user failed to address key concerns.
-- A high-stakes, low-utility impulse buy should typically be "abandon" with high confidence.
-- A clearly needed, fairly priced replacement should typically be "proceed" with high confidence.
-- Confidence reflects how clear-cut the decision is, not how strongly you feel about it.
-- The "REASONING:" field is the only field the user sees live. Make it a brief step-by-step analysis.
-- The "SUMMARY:" field is the verdict headline shown to the user — it MUST name the specific product by its title (or its leading words), never a generic phrase like "this product" or "the item".
-- The "FACTORS:" field is three short phrases (3-8 words each), separated by " | ". Name the product in at least one factor.
-- The "decision" field MUST be exactly the word "proceed" or exactly the word "abandon". Do NOT use REJECTED, APPROVED, yes, no, or any other word.
-- The "confidence" field MUST be a number between 0 and 1 (two decimals is ideal, e.g. 0.85).
-- The "factors" field MUST be exactly three short phrases, separated by " | ".
-- If you are unsure, default to "abandon" with confidence 0.5. It is far better to issue a cautious ruling than to fail to deliver the five lines.`
+- The ruling line MUST be the last thing you output. Do not add prose, headers, or markdown after it.
+- "the purchase" = the defense made the stronger case that this purchase is reasonable. The user can buy.
+- "restraint" = the prosecution made the stronger case against the purchase, or the defense failed to address the prosecution's concerns. The user should reconsider.
+- The ruling line is the only structured output. Everything before it is a free-form explanation the user reads live.
+- Be specific to the actual product and the actual arguments. Do not give generic financial advice.
+- If neither side is compelling, default to "I rule in favor of restraint." A cautious ruling is better than a false positive.
+- Do not include any chain-of-thought, reasoning blocks, JSON, or structured data outside the two allowed formats. Just the paragraph and the ruling line.`
 }
 
 function structuredJudgePromptWithItem(
-  item: import('./types.ts').CartItem | null,
-  product: Product,
-  cart: Cart | null,
+  _item: import('./types.ts').CartItem | null,
+  _product: Product,
+  _cart: Cart | null,
   subject: string,
 ): string {
-  // Pull brand/rating/etc. from the cart item when we have one (so
-  // single-item-cart trials show the cart item's real signals).
-  const d = item?.details
-  const brand = d?.brand ?? product.brand
-  const rating = d?.rating ?? product.rating
-  const reviewCount = d?.reviewCount ?? product.reviewCount
-  const prime = d?.prime ?? product.prime
-  const signalLines: string[] = []
-  if (brand) signalLines.push(`Brand: ${brand}`)
-  if (rating != null) {
-    const stars = '★'.repeat(Math.round(rating)) + '☆'.repeat(5 - Math.round(rating))
-    const reviewPart = reviewCount != null ? ` (${reviewCount.toLocaleString()} reviews)` : ''
-    signalLines.push(`Rating: ${rating} ${stars}${reviewPart}`)
-  }
-  if (prime) signalLines.push('Prime: Yes')
-  if (d?.delivery) signalLines.push(`Delivery: ${d.delivery}`)
-  if (d?.wasPrice != null && d?.savePercent != null) {
-    signalLines.push(`Was: ${formatCurrency(d.wasPrice, item?.currency ?? cart?.currency ?? null)} (save ${d.savePercent}%)`)
-  }
-  if (d?.asin) signalLines.push(`ASIN: ${d.asin}`)
-  if (d?.seller) signalLines.push(`Seller: ${d.seller}`)
-  const signalBlock = signalLines.length > 0
-    ? `\nPRODUCT SIGNALS\n${signalLines.join('\n')}\n`
-    : ''
-
-  return `You are an impartial judge presiding over a purchase trial.
-
-SUBJECT OF THE TRIAL
-${subject}
-${signalBlock}
-You have read the entire transcript. Pay particular attention to the BRAND, RATING, REVIEW COUNT, PRIME STATUS, DELIVERY, and any "Save X%" or "Was $X" signals. These materially change the weight of "is this a well-regarded product at a fair price" vs. "is this a low-quality or impulse-driven purchase". A $20 product with 4.8★ and 50k reviews is materially different from a $20 product with no brand or reviews.
-
-INSTRUCTIONS
-1. First, write a brief step-by-step analysis of the case in a single <think>...</think> block. The user can see this block live. Discuss the strength of the prosecution's arguments, the strength of the defense's, and weigh them against the product details (brand/rating/price/etc.). In your analysis, **name the specific items by their title** (e.g. "Anker USB-C Hub, 7-in-1 Adapter with 4K HDMI" or "Logitech MX Master 3S"). Do NOT use generic phrases like "this product" or "the item".
-2. Then, AFTER the think block, deliver your verdict as a single flat JSON object. Do not nest the verdict under any other key. Do not write any other prose after the think block.
-
-Decision rules:
-- "proceed" = the user has made a compelling case that the purchase is reasonable.
-- "abandon" = the case against the purchase is stronger, or the user has failed to address key concerns.
-- ${cart ? 'For a cart with multiple items, evaluate the WHOLE cart. A cart with one good item and several low-utility items is generally "abandon".' : ''}
-- A high-stakes, low-utility impulse buy should typically be "abandon" with high confidence.
-- A clearly needed, fairly priced replacement (especially one with strong reviews) should typically be "proceed" with high confidence.
-- Confidence reflects how clear-cut the decision is, not how strongly you feel about it.
-
-NAMING CONVENTION (mandatory for the JSON output)
-- The "summary" field must reference the specific items by their title (or the leading words of the title). Example: "The Anker USB-C Hub is a 4.7★ adapter that the user already owns a functional equivalent of, and the Logitech MX Master 3S at $99.99 is harder to justify without a clear ergonomic need."
-- The "topFactors" array must each name the product they relate to. Example: ["Anker hub: limited utility despite 28% discount", "Logitech MX Master 3S: vague necessity", "Cart: bundled low-utility add-on"].
-
-REQUIRED JSON SHAPE — use these EXACT field names and values:
-{
-  "decision": "proceed",
-  "confidence": 0.85,
-  "summary": "One or two plain-English sentences explaining the ruling.",
-  "topFactors": ["Short phrase 1", "Short phrase 2", "Short phrase 3"]
-}
-
-The "decision" field MUST be exactly the string "proceed" or exactly the string "abandon". Do NOT use other words like "REJECTED", "APPROVED", "yes", "no", or "deny" — the parser is strict.
-
-The "confidence" field MUST be a number between 0 and 1 (two decimals is ideal, e.g. 0.85).
-
-The "topFactors" field MUST be an array of exactly three short phrases (3-8 words each).
-
-If you are unsure, default to "abandon" with confidence 0.5 and a brief summary. It is far better to issue a cautious ruling than to fail to deliver structured JSON.`
+  // Legacy alias — see `judgeSystemPrompt` for the rationale.
+  return naturalJudgePrompt(subject)
 }
 
 /**

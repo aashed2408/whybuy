@@ -225,10 +225,13 @@ test('prosecutionSystemPrompt includes cart items when present', () => {
   assert.doesNotMatch(without, /USB-C Cable/)
 })
 
-test('judgeSystemPrompt includes cart-aware rules when cart present', () => {
-  const withCart = judgeSystemPrompt(sampleProduct, sampleCart, { judgeMode: 'structured' })
+test('judgeSystemPrompt includes cart items in the subject when cart present', () => {
+  const withCart = judgeSystemPrompt(sampleProduct, sampleCart, { judgeMode: 'natural' })
+  // The subject block is the same shape for natural/structured now
+  // (the prompt body is identical — see JudgeMode in prompts.ts).
   assert.match(withCart, /3 items totaling/)
-  assert.match(withCart, /low-utility items/)
+  assert.match(withCart, /ITEMS:/)
+  assert.match(withCart, /Headphones/)
 })
 
 test('judgeSystemPrompt falls back to product when no cart', () => {
@@ -317,25 +320,26 @@ test('judgeSystemPrompt includes brand/rating/reviewCount/prime from details', (
     source: 'amazon',
     isCheckout: false,
   }
-  const prompt = judgeSystemPrompt(sampleProduct, richCart, { judgeMode: 'structured' })
-  // The structured product card must show the brand, the rating, and the
-  // review count — these are the "diamond vs dirt" signals the user asked
-  // for. The judge should not just see "Anker USB-C Hub — USD 35.99".
-  assert.match(prompt, /Brand: Anker/)
-  assert.match(prompt, /Rating: 4\.7/)
-  assert.match(prompt, /12,453 reviews/)
-  assert.match(prompt, /Prime: Yes/)
-  assert.match(prompt, /Was: USD 49\.99 \(save 28%\)/)
-  // ASIN lives on the cart item's details, not the product.
-  assert.match(prompt, /ASIN: B07FZ8S74R/)
-  // The structured judge prompt also instructs the model to reason about these.
-  assert.match(prompt, /BRAND, RATING, REVIEW COUNT/)
+  const prompt = judgeSystemPrompt(sampleProduct, richCart, { judgeMode: 'natural' })
+  // The single-item cart flattens to a single-product subject
+  // (PRODUCT: ... PRICE: ... SITE: ...), NOT the old rich card with
+  // Brand/Rating/Prime. The model is supposed to look at the
+  // *arguments* in the transcript, not the product metadata —
+  // "diamond vs dirt" signals are in the user's defense, not the
+  // subject block.
+  assert.match(prompt, /PRODUCT: Anker USB-C Hub/)
+  assert.match(prompt, /PRICE:\s+USD 35\.99/)
+  assert.match(prompt, /SITE:\s+example\.com/)
+  // The judge must end with a clear ruling line.
+  assert.match(prompt, /I rule in favor of the purchase\./)
+  assert.match(prompt, /I rule in favor of restraint\./)
 })
 
-test('judgeSystemPrompt requests <think> reasoning block', () => {
+test('judgeSystemPrompt: ruling line options are spelled out for the model', () => {
   const prompt = judgeSystemPrompt(sampleProduct, sampleCart, { judgeMode: 'structured' })
-  assert.match(prompt, /<think>/)
-  assert.match(prompt, /think/i)
+  // structured mode now uses the same prompt as natural mode.
+  assert.match(prompt, /I rule in favor of the purchase\./)
+  assert.match(prompt, /I rule in favor of restraint\./)
 })
 
 test('prosecutionSystemPrompt shows the brand/rating in the subject', () => {
@@ -421,18 +425,21 @@ test('prosecution prompt warns the model to replace generic stand-ins with the t
   assert.match(prompt, /replace it with "Premium Wireless Headphones"/i)
 })
 
-test('natural judge prompt requires the product in SUMMARY', () => {
+test('judge prompt asks the model to name the product in its paragraph', () => {
   const prompt = judgeSystemPrompt(sampleProduct, null, { judgeMode: 'natural' })
-  // SUMMARY rule must demand the product name, not just REASONING.
-  assert.match(prompt, /SUMMARY:[\s\S]*?name the specific product/i)
-  assert.match(prompt, /never a generic phrase/i)
+  // The paragraph-writing instructions tell the model to name the
+  // product by its title. There's no longer a separate SUMMARY field
+  // — the summary is derived from the paragraph by the parser.
+  assert.match(prompt, /Name the product \(by its title\) and the price\./)
+  assert.match(prompt, /Be specific to the actual product/)
 })
 
-test('judge prompt enforces title naming in structured mode summary and factors', () => {
-  const prompt = judgeSystemPrompt(sampleProduct, sampleCart, { judgeMode: 'structured' })
-  // Judge is told to name items in the summary and topFactors.
-  assert.match(prompt, /summary.*title/s)
-  assert.match(prompt, /topFactors.*name the product/s)
+test('judge prompt: both modes produce the same output shape', () => {
+  const natural = judgeSystemPrompt(sampleProduct, null, { judgeMode: 'natural' })
+  const structured = judgeSystemPrompt(sampleProduct, null, { judgeMode: 'structured' })
+  // Both modes use the same prompt now. The 'structured' option is
+  // kept for backwards compatibility with stored settings.
+  assert.equal(natural, structured)
 })
 
 // === User-prompt must embed the product title (not just the system prompt) ===
@@ -1029,88 +1036,99 @@ test('brandInitial: leading whitespace is trimmed', () => {
 
 // === Natural judge parser (parseNaturalVerdict / verdictFromNatural) ===
 //
-// The natural judge mode is the default for non-reasoning models like
-// `ministral-3:8b` on Ollama Cloud. The model emits five labeled lines
-// (DECISION / CONFIDENCE / REASONING / SUMMARY / FACTORS) and the
-// parser turns that into a Verdict. Tests below cover:
-//   - full-shape parsing
-//   - missing or out-of-order lines
-//   - case-insensitive labels
-//   - garbage noise around the lines
-//   - multi-line REASONING / SUMMARY bodies
+// The judge is asked to produce a single paragraph weighing the
+// prosecution's and defense's arguments, ending with one of:
+//
+//   I rule in favor of the purchase.
+//   I rule in favor of restraint.
+//
+// The parser turns that into a Verdict. Tests below cover:
+//   - paragraph + ruling line parsing
+//   - lenient ruling-line matching (case, whitespace, trailing punctuation)
+//   - confidence derived from hedging language
+//   - garbage noise (preambles, code fences, markdown emphasis) tolerated
 //   - partial-streaming: parse as the model types
 //   - fallback paths (no decision, partial result)
 
 import { parseNaturalVerdict, verdictFromNatural } from '../lib/ai/judgeParse.ts'
 import { clampConfidence, fallbackVerdict, normalizeDecision } from '../lib/ai/verdictHelpers.ts'
 
-const NATURAL_OK = `DECISION: abandon
-CONFIDENCE: 0.82
-REASONING: The Nike Air Max shoes at CAD 122.94 are a want, not a need. The defense argued daily use, but the cost is disproportionate to that use case. The user did not address cheaper alternatives.
-SUMMARY: The cost of the Nike Air Max shoes is disproportionate to the demonstrated need, and the user did not address cheaper substitutes.
-FACTORS: Price disproportionate to use | No cheaper alternative cited | Likely future regret`
+const NATURAL_OK = `The Nike Air Max shoes at CAD 122.94 are a want, not a need. The prosecution argued the cost is disproportionate to a "sometimes daily" use case, and the defense did not name a single cheaper alternative. The prosecution's case is the stronger one.
 
-test('parseNaturalVerdict: full shape parses all five fields', () => {
+I rule in favor of restraint.`
+
+test('parseNaturalVerdict: full shape (paragraph + ruling line) parses correctly', () => {
   const r = parseNaturalVerdict(NATURAL_OK)
   assert.equal(r.decision, 'abandon')
-  assert.equal(r.confidence, 0.82)
-  assert.match(r.reasoning, /disproportionate/)
-  assert.match(r.summary, /disproportionate to the demonstrated need/)
-  assert.deepEqual(r.factors, ['Price disproportionate to use', 'No cheaper alternative cited', 'Likely future regret'])
+  assert.equal(r.confidence, 0.7) // default hedge (no strong language detected)
+  assert.match(r.reasoning, /Nike Air Max/)
+  assert.match(r.summary, /prosecution/i)
+  assert.equal(r.factors.length, 3)
   assert.equal(r.partial, false)
 })
 
-test('parseNaturalVerdict: case-insensitive labels', () => {
-  const raw = `decision: proceed
-confidence: 0.71
-Reasoning: The user has a clear recurring need.
-Summary: The purchase is reasonable.
-Factors: Recurring need | Fair price | Good reviews`
+test('parseNaturalVerdict: case-insensitive ruling line', () => {
+  const raw = `The product is a want, not a need. Clearly, the prosecution's case is stronger.
+
+i RULE in FAVOR of restraint.`
+  const r = parseNaturalVerdict(raw)
+  assert.equal(r.decision, 'abandon')
+})
+
+test('parseNaturalVerdict: trailing punctuation on the ruling line is OK', () => {
+  const raw = `The product is a want.
+
+I rule in favor of restraint!!`
+  const r = parseNaturalVerdict(raw)
+  assert.equal(r.decision, 'abandon')
+})
+
+test('parseNaturalVerdict: ruling in favor of the purchase', () => {
+  const raw = `The user has a clear recurring need. The defense's case is the stronger one.
+
+I rule in favor of the purchase.`
   const r = parseNaturalVerdict(raw)
   assert.equal(r.decision, 'proceed')
-  assert.equal(r.confidence, 0.71)
+  assert.equal(r.factors.length, 3)
   assert.equal(r.partial, false)
 })
 
-test('parseNaturalVerdict: whitespace tolerant', () => {
-  const raw = `   DECISION:    proceed
-  CONFIDENCE:    0.50
-  REASONING:   ok
-  SUMMARY:  ok
-  FACTORS: a   |   b   |   c`
+test('parseNaturalVerdict: hedges drive confidence (clearly -> 0.85)', () => {
+  const raw = `Clearly, the prosecution's case is stronger.
+
+I rule in favor of restraint.`
   const r = parseNaturalVerdict(raw)
-  assert.equal(r.decision, 'proceed')
-  assert.equal(r.factors[0], 'a')
-  assert.equal(r.partial, false)
+  assert.equal(r.decision, 'abandon')
+  assert.equal(r.confidence, 0.85)
+})
+
+test('parseNaturalVerdict: hedges drive confidence (borderline -> 0.55)', () => {
+  const raw = `This is a borderline case. The prosecution was marginally more compelling.
+
+I rule in favor of restraint.`
+  const r = parseNaturalVerdict(raw)
+  assert.equal(r.decision, 'abandon')
+  assert.equal(r.confidence, 0.55)
 })
 
 test('parseNaturalVerdict: garbage noise around the lines is ignored', () => {
-  const raw = `Sure, here's my ruling.
+  const raw = `Sure, here's my ruling:
 
-Let me think about this case.
+The product is a want.
 
-DECISION: abandon
-CONFIDENCE: 0.65
-REASONING: The product is a want.
-SUMMARY: The case for restraint is stronger.
-FACTORS: Want not need | Cost high | Cheaper alternative exists
+I rule in favor of restraint.
 
-I hope this helps! Let me know if you need anything else.`
+I hope this helps!`
   const r = parseNaturalVerdict(raw)
   assert.equal(r.decision, 'abandon')
-  assert.equal(r.confidence, 0.65)
-  assert.match(r.reasoning, /want/)
-  assert.match(r.summary, /restraint is stronger/)
   assert.equal(r.partial, false)
 })
 
-test('parseNaturalVerdict: missing lines produce partial=true', () => {
-  const r = parseNaturalVerdict(`DECISION: abandon
-CONFIDENCE: 0.5
-REASONING: just getting started`)
+test('parseNaturalVerdict: missing ruling line falls back to lenient normalization', () => {
+  // The model forgot the "I rule in favor of" phrasing. Lenient
+  // normalization looks for "the prosecution wins" / "the user wins" / etc.
+  const r = parseNaturalVerdict(`The prosecution wins this case. The product is a want.`)
   assert.equal(r.decision, 'abandon')
-  assert.equal(r.confidence, 0.5)
-  assert.equal(r.partial, true)
 })
 
 test('parseNaturalVerdict: empty input is safe', () => {
@@ -1121,19 +1139,16 @@ test('parseNaturalVerdict: empty input is safe', () => {
   assert.deepEqual(r.factors, [])
 })
 
-test('parseNaturalVerdict: streaming — partial flips to false as lines arrive', () => {
+test('parseNaturalVerdict: streaming — partial flips to false as the ruling line arrives', () => {
   // Simulate the model streaming token-by-token. The parser should
-  // return partial=true until the FACTORS line has three items.
+  // return partial=true until the ruling line is complete.
   const chunks = [
-    'DECISION: abandon',
-    '\nCONFIDENCE: 0.7',
-    '\nREASONING: The cost is',
-    ' disproportionate',
-    ' to the use case',
-    '.\nSUMMARY: The case for restraint',
-    ' is stronger.\nFACTORS: a',
-    ' | b',
-    ' | c',
+    'The product is a want,',
+    ' not a need.',
+    ' The prosecution made',
+    ' the stronger case.',
+    '\n\nI rule in favor of',
+    ' restraint.',
   ]
   let acc = ''
   let lastPartial = true
@@ -1148,74 +1163,51 @@ test('parseNaturalVerdict: streaming — partial flips to false as lines arrive'
   assert.equal(lastDecision, 'abandon')
 })
 
-test('parseNaturalVerdict: REASONING can span multiple lines', () => {
-  const raw = `DECISION: abandon
-CONFIDENCE: 0.6
-REASONING: Line one of reasoning.
-Line two of reasoning.
-Line three of reasoning.
-SUMMARY: short summary
-FACTORS: a | b | c`
+test('parseNaturalVerdict: paragraph can span multiple lines', () => {
+  const raw = `The Nike Air Max shoes are a want, not a need.
+The prosecution argued the cost is disproportionate.
+The defense did not name a cheaper alternative.
+The prosecution made the stronger case.
+
+I rule in favor of restraint.`
   const r = parseNaturalVerdict(raw)
-  assert.match(r.reasoning, /Line one/)
-  assert.match(r.reasoning, /Line three/)
+  assert.equal(r.decision, 'abandon')
+  assert.match(r.reasoning, /Nike Air Max/)
+  assert.match(r.reasoning, /disproportionate/)
   assert.equal(r.partial, false)
 })
 
 test('parseNaturalVerdict: lenient decision normalization (REJECTED -> abandon)', () => {
-  // The natural judge mode shares `normalizeDecision` with the
-  // structured mode, which is intentionally lenient: small / instruct
-  // models often write REJECTED, APPROVED, deny, etc. We accept those
-  // rather than reject the verdict entirely.
-  const r1 = parseNaturalVerdict(`DECISION: REJECTED
-CONFIDENCE: 0.5
-REASONING: x
-SUMMARY: x
-FACTORS: a | b | c`)
+  // When the model forgets the "I rule in favor of" phrasing but
+  // writes something the lenient normalizer recognises (REJECTED,
+  // APPROVED, prosecution wins, etc.), the parser still extracts
+  // the decision from the body.
+  const r1 = parseNaturalVerdict('The product is overpriced. REJECTED.')
   assert.equal(r1.decision, 'abandon')
 
-  const r2 = parseNaturalVerdict(`DECISION: APPROVED
-CONFIDENCE: 0.5
-REASONING: x
-SUMMARY: x
-FACTORS: a | b | c`)
+  const r2 = parseNaturalVerdict('The defense made the case. APPROVED.')
   assert.equal(r2.decision, 'proceed')
 })
 
 test('parseNaturalVerdict: strips markdown code fences around the ruling', () => {
   // The Prompt API and some Ollama Cloud models wrap the response in
-  // ``` blocks. The parser must still find the five lines.
-  const wrapped = '```\nDECISION: proceed\nCONFIDENCE: 0.7\nREASONING: x\nSUMMARY: y\nFACTORS: a | b | c\n```'
+  // ``` blocks. The parser must still find the ruling line.
+  const wrapped = '```\nThe product is a want.\n\nI rule in favor of restraint.\n```'
   const parsed = parseNaturalVerdict(wrapped)
-  assert.equal(parsed.decision, 'proceed')
-  assert.equal(parsed.confidence, 0.7)
+  assert.equal(parsed.decision, 'abandon')
   assert.equal(parsed.factors.length, 3)
 })
 
 test('parseNaturalVerdict: strips "Sure, here is the ruling:" preamble', () => {
-  const with_preamble = "Sure, here's the ruling:\n\nDECISION: abandon\nCONFIDENCE: 0.5\nREASONING: x\nSUMMARY: y\nFACTORS: a | b | c"
+  const with_preamble = "Sure, here's the ruling:\n\nThe product is a want.\n\nI rule in favor of restraint."
   const parsed = parseNaturalVerdict(with_preamble)
   assert.equal(parsed.decision, 'abandon')
-  assert.equal(parsed.confidence, 0.5)
 })
 
-test('parseNaturalVerdict: tolerates **DECISION**: markdown-bold labels', () => {
-  const bolded = '**DECISION**: proceed\n**CONFIDENCE**: 0.7\n**REASONING**: x\n**SUMMARY**: y\n**FACTORS**: a | b | c'
+test('parseNaturalVerdict: tolerates **I rule in favor of** markdown-bold ruling', () => {
+  const bolded = 'The product is a want.\n\n**I rule in favor of restraint.**'
   const parsed = parseNaturalVerdict(bolded)
-  assert.equal(parsed.decision, 'proceed')
-  assert.equal(parsed.confidence, 0.7)
-  assert.equal(parsed.factors.length, 3)
-})
-
-test('parseNaturalVerdict: factors line is split on |', () => {
-  const raw = `DECISION: proceed
-CONFIDENCE: 0.8
-REASONING: x
-SUMMARY: y
-FACTORS: alpha | beta | gamma | extra-fourth`
-  const r = parseNaturalVerdict(raw)
-  assert.deepEqual(r.factors, ['alpha', 'beta', 'gamma'])
-  assert.equal(r.partial, false)
+  assert.equal(parsed.decision, 'abandon')
 })
 
 test('parseNaturalVerdict: garbage-only input is safe', () => {
@@ -1224,19 +1216,14 @@ test('parseNaturalVerdict: garbage-only input is safe', () => {
   assert.equal(r.partial, true)
 })
 
-test('parseNaturalVerdict: confidence out of range is clamped', () => {
-  const r = parseNaturalVerdict(`DECISION: abandon
-CONFIDENCE: 1.5
-REASONING: x
-SUMMARY: y
-FACTORS: a | b | c`)
-  assert.equal(r.confidence, 1.0)
-  const r2 = parseNaturalVerdict(`DECISION: abandon
-CONFIDENCE: -0.3
-REASONING: x
-SUMMARY: y
-FACTORS: a | b | c`)
-  assert.equal(r2.confidence, 0)
+test('parseNaturalVerdict: ruling line in the middle of the body is still found', () => {
+  // Some models don't put the ruling line at the end. We pick the
+  // LATEST ruling line in the text.
+  const raw = `If I were to rule in favor of restraint the case would be strong, but on balance the defense addressed the cost concern.
+
+I rule in favor of the purchase.`
+  const r = parseNaturalVerdict(raw)
+  assert.equal(r.decision, 'proceed')
 })
 
 // === verdictFromNatural ===
@@ -1245,19 +1232,17 @@ test('verdictFromNatural: complete result returns a verdict', () => {
   const parsed = parseNaturalVerdict(NATURAL_OK)
   const v = verdictFromNatural(parsed)
   assert.equal(v.decision, 'abandon')
-  assert.equal(v.confidence, 0.82)
-  assert.match(v.summary, /disproportionate/)
+  assert.match(v.summary, /prosecution/i)
   assert.equal(v.topFactors.length, 3)
 })
 
 test('verdictFromNatural: partial result with decision still returns a verdict', () => {
-  const parsed = parseNaturalVerdict(`DECISION: proceed
-CONFIDENCE: 0.5
-REASONING: just started`)
+  const parsed = parseNaturalVerdict(`The product is a want.`)
   const v = verdictFromNatural(parsed, 'no fallback reason')
-  assert.equal(v.decision, 'proceed')
-  assert.equal(v.confidence, 0.5)
-  // Falls back to a generic factor set since 3 weren't parsed.
+  // The model didn't emit a ruling line, so decision is null and
+  // we fall back to the cautious ruling.
+  assert.equal(v.decision, 'abandon')
+  assert.equal(v.confidence, 0.6)
   assert.equal(v.topFactors.length, 3)
 })
 
@@ -1361,30 +1346,36 @@ test('prosecutionSystemPrompt: default is minimal', () => {
   assert.doesNotMatch(p, /Brand:/)
 })
 
-// === Natural-judge prompt ===
+// === Judge prompt: paragraph + ruling line shape (both modes) ===
 
-test('judgeSystemPrompt({judgeMode:"natural"}) uses the line shape, no think/JSON', () => {
+test('judgeSystemPrompt: paragraph + ruling line, no think/JSON/labeled fields', () => {
   const p = judgeSystemPrompt(sampleProduct, null, { judgeMode: 'natural' })
-  assert.match(p, /DECISION:/)
-  assert.match(p, /CONFIDENCE:/)
-  assert.match(p, /REASONING:/)
-  assert.match(p, /SUMMARY:/)
-  assert.match(p, /FACTORS:/)
-  // Must NOT contain the structured-mode signals.
+  // The judge now writes a paragraph + an "I rule in favor of X."
+  // line. No structured fields.
+  assert.match(p, /single paragraph \(3-5 sentences\)/i)
+  assert.match(p, /I rule in favor of the purchase\./)
+  assert.match(p, /I rule in favor of restraint\./)
+  // The prompt explicitly forbids thinking/reasoning/JSON.
+  assert.match(p, /Do not include any chain-of-thought, reasoning blocks, JSON/i)
+  // No legacy labeled fields.
+  assert.doesNotMatch(p, /DECISION:/)
+  assert.doesNotMatch(p, /CONFIDENCE:/)
+  assert.doesNotMatch(p, /REASONING:/)
+  assert.doesNotMatch(p, /SUMMARY:/)
+  assert.doesNotMatch(p, /FACTORS:/)
   assert.doesNotMatch(p, /<think>/)
-  assert.doesNotMatch(p, /strict JSON/)
-  assert.doesNotMatch(p, /JSON object/)
 })
 
-test('judgeSystemPrompt({judgeMode:"structured"}) keeps the think+JSON format', () => {
+test('judgeSystemPrompt({judgeMode:"structured"}) uses the same paragraph shape', () => {
   const p = judgeSystemPrompt(sampleProduct, null, { judgeMode: 'structured' })
-  assert.match(p, /<think>/)
-  assert.match(p, /JSON/)
+  assert.match(p, /I rule in favor of the purchase\./)
+  assert.match(p, /I rule in favor of restraint\./)
+  assert.doesNotMatch(p, /<think>/)
 })
 
-test('judgeSystemPrompt: default is natural', () => {
+test('judgeSystemPrompt: default is natural (paragraph shape)', () => {
   const p = judgeSystemPrompt(sampleProduct, null)
-  assert.match(p, /DECISION:/)
+  assert.match(p, /I rule in favor of the purchase\./)
   assert.doesNotMatch(p, /<think>/)
 })
 

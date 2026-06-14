@@ -198,11 +198,10 @@ export class BYOK implements AIProvider {
   ): Promise<Verdict> {
     const messages = this.buildJudgeMessages(args)
     const text = await this.nonStreamChat(messages, signal)
-    if (this.judgeMode === 'structured') {
-      return this.parseStructuredVerdict(text)
-    }
+    // Both 'natural' and 'structured' judge modes use the same
+    // paragraph + ruling line shape now.
     const parsed = parseNaturalVerdict(text)
-    return verdictFromNatural(parsed, 'natural judge returned no ruling')
+    return verdictFromNatural(parsed, 'judge returned no ruling')
   }
 
   /**
@@ -228,14 +227,14 @@ export class BYOK implements AIProvider {
     onReasoning: (text: string) => void,
     signal?: AbortSignal,
   ): Promise<{ verdict: Verdict; reasoning: string }> {
-    const mode = this.judgeMode
     const messages = this.buildJudgeMessages(args)
     const t0 = Date.now()
-
-    if (mode === 'natural') {
-      return this.streamJudgeNatural(messages, onReasoning, signal, t0)
-    }
-    return this.streamJudgeStructured(messages, onReasoning, signal, t0)
+    // Both 'natural' and 'structured' judge modes use the same
+    // paragraph + ruling line shape now (the structured path was
+    // removed because small / non-reasoning models couldn't follow
+    // it, and reasoning models wasted their tokens on internal
+    // chain-of-thought the user couldn't act on).
+    return this.streamJudgeNatural(messages, onReasoning, signal, t0)
   }
 
   /**
@@ -395,8 +394,8 @@ export class BYOK implements AIProvider {
       .join('\n\n')
     const tail =
       this.judgeMode === 'natural'
-        ? 'Write your ruling in the DECISION/CONFIDENCE/REASONING/SUMMARY/FACTORS shape. No prose before or after the ruling.'
-        : 'Write your step-by-step analysis in a single <think>...</think> block, then deliver your verdict as strict JSON.'
+        ? 'Write a single paragraph weighing the two arguments, then end with exactly one of these two lines on its own line: "I rule in favor of the purchase." or "I rule in favor of restraint." Nothing after the ruling line.'
+        : 'Write a single paragraph weighing the two arguments, then end with exactly one of these two lines on its own line: "I rule in favor of the purchase." or "I rule in favor of restraint." Nothing after the ruling line.'
     messages.push({ role: 'user', content: `FULL TRANSCRIPT:\n${transcript}\n\n${tail}` })
     return messages
   }

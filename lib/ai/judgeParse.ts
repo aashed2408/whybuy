@@ -2,103 +2,169 @@ import { clampConfidence, fallbackVerdict, normalizeDecision } from './verdictHe
 import type { Verdict } from './types.ts'
 
 /**
- * Parser for the "natural" judge mode: a line-based ruling format that
- * works for any model (including small non-reasoning models like
- * `ministral-3:8b` on Ollama Cloud).
+ * Parser for the judge output.
  *
- * The model is asked to emit exactly these lines, in this order, with
- * no prose before or after:
+ * The model is asked to produce a single paragraph (3-5 sentences)
+ * weighing the prosecution's and defense's arguments, ending with
+ * exactly one of these two lines on its own line:
  *
- *   DECISION:   <proceed|abandon>
- *   CONFIDENCE: <0.00-1.00>
- *   REASONING:  <2-4 sentences; streamed live to the user>
- *   SUMMARY:    <1-2 sentence plain-English ruling>
- *   FACTORS:    <factor 1> | <factor 2> | <factor 3>
+ *   I rule in favor of the purchase.
+ *   I rule in favor of restraint.
  *
- * The parser is:
- *   - idempotent: same input → same output
- *   - case-insensitive on the labels (`Decision:`, `decision:`, `DECISION:`)
- *   - tolerant: missing lines just leave the corresponding field null
- *   - streaming-friendly: returns `partial: true` until decision +
- *     confidence + summary + three factors are all present
- *   - tolerant of garbage: noise around the lines is ignored
- *   - tolerant of multi-line values: `REASONING:` and `SUMMARY:` may
- *     span multiple lines, terminated by the next label or by EOF
+ * The parser:
+ *   - finds the ruling line (case-insensitive, tolerant of trailing
+ *     punctuation, tolerant of code fences / preambles via
+ *     `sanitizeNaturalOutput`)
+ *   - derives confidence from the paragraph's hedging language
+ *     (e.g. "clearly" → 0.85, "borderline" → 0.55)
+ *   - builds the verdict summary from the first 1-2 sentences of
+ *     the paragraph
+ *   - uses a fixed 3-factor list for the decisive factors (the
+ *     model isn't required to produce them; the user-facing UI
+ *     needs exactly three)
+ *
+ * The parser is idempotent and never throws. A failed parse
+ * returns a `partial: true` result; the caller decides what to
+ * fall back to.
  */
-
 export interface NaturalParseResult {
   decision: 'proceed' | 'abandon' | null
   confidence: number | null
-  /** Trimmed body of the `REASONING:` line. Safe to stream live. */
+  /** The full paragraph the model wrote, sans the ruling line. */
   reasoning: string
-  /** Trimmed body of the `SUMMARY:` line. Becomes `verdict.summary`. */
+  /** The first 1-2 sentences of the paragraph. Becomes `verdict.summary`. */
   summary: string
-  /** 0-3 factor strings split from the `FACTORS:` line. */
+  /** Always exactly 3 factor strings once a decision is known. */
   factors: string[]
   /**
-   * True while any required field is missing. Used by the streaming
-   * loop in `byok.ts` to know when to stop polling. A non-partial
-   * result is still not necessarily a "good" verdict — callers should
-   * also check that `decision !== null && confidence !== null`.
+   * True while decision/confidence/summary/three factors are all
+   * missing. The streaming loop polls this to know when to stop.
    */
   partial: boolean
 }
 
 /**
- * Regular expressions for each label.
- *
- * We use the `m` flag so `^` and `$` match line boundaries. The
- * `REASONING:` and `SUMMARY:` bodies are captured non-greedily and
- * terminated by either the next label or end-of-string, so they may
- * span multiple lines.
+ * The exact ruling line strings the model is told to emit. We accept
+ * any of these (case-insensitive) when looking for the ruling.
  */
-const RE_DECISION = /^[ \t]*DECISION[ \t]*:[ \t]*(.+?)[ \t]*$/im
-const RE_CONFIDENCE = /^[ \t]*CONFIDENCE[ \t]*:[ \t]*([+-]?[0-9]+(?:\.[0-9]+)?)[ \t]*$/im
-const RE_REASONING = /^[ \t]*REASONING[ \t]*:[ \t]*([\s\S]*?)(?=^[ \t]*(?:SUMMARY|FACTORS|DECISION|CONFIDENCE)[ \t]*:|\z)/im
-const RE_SUMMARY = /^[ \t]*SUMMARY[ \t]*:[ \t]*([\s\S]*?)(?=^[ \t]*(?:FACTORS|DECISION|CONFIDENCE|REASONING)[ \t]*:|\z)/im
-const RE_FACTORS = /^[ \t]*FACTORS[ \t]*:[ \t]*(.+?)[ \t]*$/im
+const RULING_FOR_PURCHASE_RE = /^[ \t]*I[ \t]+rule[ \t]+in[ \t]+favor[ \t]+of[ \t]+the[ \t]+purchase\b[ \t]*[.!?]*[ \t]*$/im
+const RULING_FOR_RESTRAINT_RE = /^[ \t]*I[ \t]+rule[ \t]+in[ \t]+favor[ \t]+of[ \t]+restraint\b[ \t]*[.!?]*[ \t]*$/im
 
 /**
- * Parse a model's natural-mode output. Always returns a result object;
- * never throws. `partial` is true while decision/confidence/summary/
- * three factors are all missing.
+ * Parse a judge's response. Always returns a result object; never
+ * throws. `partial` is true while decision/confidence/summary are
+ * all missing.
  */
 export function parseNaturalVerdict(raw: string): NaturalParseResult {
-  if (!raw) {
-    return empty()
-  }
+  if (!raw) return empty()
 
-  // Sanitize: strip markdown code fences (Prompt API + Ollama Cloud
-  // models both sometimes wrap the response in ```...```), strip
-  // common preambles like "Sure, here is the ruling:", and strip
-  // markdown emphasis (**, _) around the label so "**DECISION**:"
-  // still matches the line regex.
   const sanitized = sanitizeNaturalOutput(raw)
 
-  const decisionRaw = matchGroup(sanitized, RE_DECISION)
-  const confidenceRaw = matchGroup(sanitized, RE_CONFIDENCE)
-  const reasoningRaw = matchGroup(sanitized, RE_REASONING)
-  const summaryRaw = matchGroup(sanitized, RE_SUMMARY)
-  const factorsRaw = matchGroup(sanitized, RE_FACTORS)
+  // Find the ruling line. The model is told to put it on its own
+  // line at the END of the response, but be lenient if it's
+  // somewhere in the middle (some models don't follow the order).
+  const purchaseMatch = sanitized.match(RULING_FOR_PURCHASE_RE)
+  const restraintMatch = sanitized.match(RULING_FOR_RESTRAINT_RE)
 
-  const decision = normalizeDecision(decisionRaw)
-  const confidence = confidenceRaw != null ? clampConfidence(confidenceRaw) : null
-  const reasoning = (reasoningRaw || '').trim()
-  const summary = (summaryRaw || '').trim()
-  const factors = (factorsRaw || '')
-    .split('|')
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .slice(0, 3)
+  // Use whichever ruling line comes LAST in the text — the model
+  // might write "I rule in favor of restraint" inside a sentence
+  // describing the alternative, then "I rule in favor of the
+  // purchase" as the actual ruling.
+  let decision: 'proceed' | 'abandon' | null = null
+  if (purchaseMatch && restraintMatch) {
+    const purchaseIdx = sanitized.indexOf(purchaseMatch[0])
+    const restraintIdx = sanitized.indexOf(restraintMatch[0])
+    decision = purchaseIdx > restraintIdx ? 'proceed' : 'abandon'
+  } else if (purchaseMatch) {
+    decision = 'proceed'
+  } else if (restraintMatch) {
+    decision = 'abandon'
+  } else {
+    // No "I rule in favor of X" line. Try the lenient body search
+    // for common synonyms the model might use when it forgets the
+    // exact ruling phrasing.
+    decision = lenientDecisionFromBody(sanitized)
+  }
+
+  // Strip the ruling line(s) from the body so the rest is the
+  // paragraph-only reasoning.
+  const body = sanitized
+    .replace(RULING_FOR_PURCHASE_RE, '')
+    .replace(RULING_FOR_RESTRAINT_RE, '')
+    .trim()
+
+  // Derive confidence from the paragraph's hedging language.
+  const confidence = decision ? confidenceFromHedges(body) : null
+
+  // Build the summary: first 1-2 sentences of the paragraph.
+  const summary = buildSummary(body, decision)
+
+  // Three decisive factors based on the decision. The model isn't
+  // required to produce these — the UI just needs three rows.
+  const factors = decision
+    ? decision === 'proceed'
+      ? ['Defense addressed key concerns', 'Reasonable necessity established', 'Price justified for stated use']
+      : ['Prosecution made the stronger case', 'Cost outweighs demonstrated need', 'Safer to reconsider']
+    : []
 
   const partial = !(decision && confidence != null && summary.length > 0 && factors.length === 3)
 
-  return { decision, confidence, reasoning, summary, factors, partial }
+  return { decision, confidence, reasoning: body, summary, factors, partial }
+}
+
+/**
+ * Build a 1-2 sentence summary from the body. If the body is
+ * empty (model only emitted the ruling line), fall back to a
+ * neutral phrasing that names the decision.
+ */
+function buildSummary(body: string, decision: 'proceed' | 'abandon' | null): string {
+  if (!body) {
+    if (decision === 'proceed') return 'The defense made the stronger case for the purchase.'
+    if (decision === 'abandon') return 'The prosecution made the stronger case against the purchase.'
+    return ''
+  }
+  // Take the first two sentence-ending chunks. "Sentence" is
+  // anything ending in `.`, `!`, or `?`.
+  const sentences = body
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0)
+  const picked = sentences.slice(0, 2).join(' ')
+  return picked || body.slice(0, 400)
+}
+
+/**
+ * Derive a confidence score from the hedging language in the
+ * paragraph. We use simple keyword matches — this is intentionally
+ * not a precise calibration, just a reasonable approximation that
+ * "the user reads a coherent number, not a coin flip".
+ */
+function confidenceFromHedges(body: string): number {
+  const text = body.toLowerCase()
+
+  // Strong language — model is sure
+  if (/\b(clearly|obviously|without question|undoubtedly|compellingly|conclusively)\b/.test(text)) {
+    return 0.85
+  }
+  // The defense / prosecution was correct, etc.
+  if (/\b(correctly|rightly|right to|the defense wins|the prosecution wins)\b/.test(text)) {
+    return 0.8
+  }
+  // Hedging
+  if (/\b(perhaps|maybe|i think|i believe|arguably|possibly)\b/.test(text)) {
+    return 0.6
+  }
+  // Borderline
+  if (/\b(borderline|marginal|narrowly|just barely|a coin flip|close call)\b/.test(text)) {
+    return 0.55
+  }
+  // Default
+  return 0.7
 }
 
 /**
  * Strip markdown code fences, common preambles, and inline
- * emphasis around the label markers so the line regexes match.
+ * emphasis around the ruling markers so the regexes match.
  */
 function sanitizeNaturalOutput(raw: string): string {
   let s = raw
@@ -108,22 +174,21 @@ function sanitizeNaturalOutput(raw: string): string {
   s = s.replace(/\r?\n[ \t]*```[ \t]*$/gm, '')
   // Strip common preambles on the first ~3 lines
   s = s.replace(
-    /^(?:sure[,.!]?\s+here(?:\s+is)?\s+(?:the\s+)?(?:my\s+)?(?:final\s+)?ruling[:.]?\s*|here(?:'s|\s+is)\s+(?:the\s+)?(?:my\s+)?(?:final\s+)?ruling[:.]?\s*|ruling[:.]?\s*|final\s+ruling[:.]?\s*|my\s+ruling[:.]?\s*|verdict[:.]?\s*|the\s+ruling\s+is\s+as\s+follows[:.]?\s*)+/i,
+    /^(?:sure[,.!]?\s+here(?:\s+is)?\s+(?:the\s+)?(?:my\s+)?(?:final\s+)?ruling[:.]?\s*|here(?:'s|\s+is)\s+(?:the\s+)?(?:my\s+)?(?:final\s+)?ruling[:.]?\s*|ruling[:.]?\s*|final\s+ruling[:.]?\s*|my\s+ruling[:.]?\s*|verdict[:.]?\s*|the\s+ruling\s+is\s+as\s+follows[:.]?\s*|after\s+reviewing[,.]\s*)+/i,
     '',
   )
-  // Strip markdown emphasis around label tokens on each line.
-  // We only target known label names so we don't mangle real text.
-  s = s.replace(/^[ \t]*[*_]{1,3}(DECISION|CONFIDENCE|REASONING|SUMMARY|FACTORS)[*_]{1,3}[ \t]*:/gim, '$1:')
+  // Strip markdown emphasis around the ruling markers. We have to
+  // match both with and without a trailing colon because the
+  // ruling line has no colon (just the phrase + period).
+  s = s.replace(
+    /^[ \t]*[*_]{1,3}(I rule in favor of the purchase|restraint)[*_]{1,3}[ \t]*[.!]?[ \t]*$/gim,
+    '$1',
+  )
+  s = s.replace(
+    /^[ \t]*[*_]{1,3}(I rule in favor of the purchase|restraint)[*_]{1,3}[ \t]*[.!]?[ \t]*/gim,
+    '$1',
+  )
   return s
-}
-
-function matchGroup(raw: string, re: RegExp): string | null {
-  const m = raw.match(re)
-  return m && typeof m[1] === 'string' ? m[1] : null
-}
-
-function empty(): NaturalParseResult {
-  return { decision: null, confidence: null, reasoning: '', summary: '', factors: [], partial: true }
 }
 
 /**
@@ -132,7 +197,7 @@ function empty(): NaturalParseResult {
  * `summary` fallback uses the reasoning body so the user still sees
  * something meaningful on the verdict card.
  */
-export function verdictFromNatural(result: NaturalParseResult, fallbackReason = 'natural judge returned no ruling'): Verdict {
+export function verdictFromNatural(result: NaturalParseResult, fallbackReason = 'judge returned no ruling'): Verdict {
   if (
     result.decision &&
     result.confidence != null &&
@@ -146,9 +211,9 @@ export function verdictFromNatural(result: NaturalParseResult, fallbackReason = 
       topFactors: [result.factors[0], result.factors[1], result.factors[2]],
     }
   }
-  // Partial result with at least a decision — surface a summary built
-  // from what we have so the user is never left with a default ruling
-  // when the model did try.
+  // Partial result with at least a decision — surface a summary
+  // built from what we have so the user is never left with a
+  // default ruling when the model did try.
   if (result.decision) {
     const fallbackSummary =
       result.summary ||
@@ -173,4 +238,27 @@ function fallbackFactors(decision: 'proceed' | 'abandon'): [string, string, stri
     return ['User addressed concerns', 'Price justified by use', 'No cheaper alternative established']
   }
   return ['Concerns not addressed', 'Cost not justified', 'Safer to wait']
+}
+
+function empty(): NaturalParseResult {
+  return { decision: null, confidence: null, reasoning: '', summary: '', factors: [], partial: true }
+}
+
+/**
+ * Lenient body search for the decision when the model forgot the
+ * "I rule in favor of X" phrasing. Looks for common synonyms as
+ * whole-word substrings. Falls back to `normalizeDecision` (which
+ * does an exact trimmed match against its known phrases).
+ */
+function lenientDecisionFromBody(body: string): 'proceed' | 'abandon' | null {
+  const t = body.toLowerCase()
+  if (/\bprosecution wins\b/.test(t)) return 'abandon'
+  if (/\bdefense wins\b/.test(t)) return 'proceed'
+  if (/\bprosecution loses\b/.test(t)) return 'proceed'
+  if (/\bdefense loses\b/.test(t)) return 'abandon'
+  if (/\brejected\b/.test(t) || /\bdenied\b/.test(t) || /\bno\b/.test(t)) return 'abandon'
+  if (/\bapproved\b/.test(t) || /\bgranted\b/.test(t) || /\byes\b/.test(t)) return 'proceed'
+  if (/\bin favor of restraint\b/.test(t)) return 'abandon'
+  if (/\bin favor of (the )?(purchase|cart)\b/.test(t)) return 'proceed'
+  return normalizeDecision(body)
 }

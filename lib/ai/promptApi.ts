@@ -222,37 +222,27 @@ export class PromptApiProvider implements AIProvider {
     const subjectLine = buildCounselSubjectLine(args.product, args.cart)
 
     const tail =
-      mode === 'natural'
-        ? 'Write your ruling in the DECISION/CONFIDENCE/REASONING/SUMMARY/FACTORS shape. No prose before or after the ruling.'
-        : 'Deliver your verdict as strict JSON after a <think>...</think> block.'
+      // Both modes now use the same paragraph + ruling line shape.
+      // The structured-mode option is kept for backwards compatibility
+      // with stored settings; it no longer requires think/JSON.
+      'Write a single paragraph weighing the two arguments, then end with exactly one of these two lines on its own line: "I rule in favor of the purchase." or "I rule in favor of restraint." Nothing after the ruling line.'
 
     const userPrompt = `${subjectLine}\n\nFULL TRANSCRIPT:\n${transcript}\n\n${tail}`
 
     let text = await session.prompt(userPrompt)
     let verdict: Verdict | null = null
-    if (mode === 'structured') {
-      verdict = tryParseStructured(text)
-    } else {
-      const parsed = parseNaturalVerdict(text)
-      verdict = verdictFromNatural(parsed, 'Prompt API returned an unparseable natural ruling')
-    }
+    const parsed = parseNaturalVerdict(text)
+    verdict = verdictFromNatural(parsed, 'Prompt API returned an unparseable natural ruling')
 
     if (!verdict) {
-      // Retry once with a stricter instruction. In natural mode we
-      // re-feed the lines; in structured mode we ask for JSON only.
+      // Retry once with a stricter instruction.
       const retryUserPrompt =
-        mode === 'natural'
-          ? userPrompt +
-            '\n\nRespond with the five lines exactly: DECISION: <proceed|abandon>, CONFIDENCE: <0..1>, REASONING: <text>, SUMMARY: <text>, FACTORS: <a> | <b> | <c>. No prose before DECISION.'
-          : userPrompt + '\n\nRespond with ONLY a JSON object. No prose, no markdown.'
+        userPrompt +
+        '\n\nRemember: end with EXACTLY one of these two lines, on its own line, with nothing after it: "I rule in favor of the purchase." or "I rule in favor of restraint."'
       const retry = await session.prompt(retryUserPrompt)
       text = retry
-      if (mode === 'structured') {
-        verdict = tryParseStructured(retry)
-      } else {
-        const parsed = parseNaturalVerdict(retry)
-        verdict = verdictFromNatural(parsed, 'Prompt API retry returned an unparseable natural ruling')
-      }
+      const retryParsed = parseNaturalVerdict(retry)
+      verdict = verdictFromNatural(retryParsed, 'Prompt API retry returned an unparseable natural ruling')
     }
     try {
       session.destroy?.()
