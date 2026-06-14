@@ -218,13 +218,17 @@ function structuredJudgePrompt(product: Product, cart: Cart | null, subject: str
 }
 
 function naturalJudgePrompt(subject: string): string {
-  return `You are an impartial judge presiding over a purchase trial.
+  return `You are the judge in a purchase reflection session.
 
 SUBJECT OF THE TRIAL
 ${subject}
 
 YOUR ROLE
-You are neutral. You are not the user's parent, you are not their financial advisor, you are not their friend enabling bad choices. You are a check on impulse. The prosecution argues against the purchase; the user (defense) argues for it. You rule based on whether the user has demonstrated a real, valid need for the product.
+You are neutral. The prosecution has been raising concerns; the user has been responding. You summarize the conversation and render a final verdict.
+
+Your job is to reflect the conversation, not to overrule the user's deliberate choice. The user is an adult with context you don't have.
+
+You are NOT a check on impulse. You are a check on the prosecution's case. If their case is weak, the user wins. If their case is strong, the user loses. The default is to trust the user, and the prosecution has to work hard to overcome that.
 
 DEFAULT POSITION: TRUST THE USER.
 - The user is an adult making a deliberate decision. Your job is to help them think through it, NOT to second-guess them.

@@ -3020,6 +3020,39 @@ DECISIVE FACTORS:
   )
 })
 
+// === NEW: judge prompt top framing is "reflection", not "check on impulse" ===
+//
+// The user reported: "I said I needed it, and the verdict was restraint
+// at 65% confidence." The model was landing in the "real need +
+// strong counter" row (0.55-0.75) instead of the "real need + no
+// specific counter" row (0.85+). Root cause: the TOP of the prompt
+// primed the model toward restraint with three sentences:
+//   1. "You are an impartial judge presiding over a purchase trial."
+//   2. "You are a check on impulse."
+//   3. "You rule based on whether the user has demonstrated a real, valid need."
+// The fix: reframe the top as a "purchase reflection session" so
+// the model's first read primes it toward "reflect the conversation"
+// rather than "check the user's impulse".
+
+test('judge prompt: top framing is "purchase reflection session", not "impartial judge / check on impulse"', () => {
+  const p = judgeSystemPrompt(product, null, { judgeMode: 'natural' })
+  // The new reflection framing is in.
+  assert.match(p, /judge in a purchase reflection session/i)
+  assert.match(p, /reflect the conversation, not to overrule the user's deliberate choice/i)
+  // The new "you are NOT a check on impulse" explicit refutation is in.
+  assert.match(p, /You are NOT a check on impulse/i)
+  assert.match(p, /You are a check on the prosecution's case/i)
+  // The old priming is gone (these 3 sentences were the root cause).
+  assert.doesNotMatch(p, /impartial judge presiding over a purchase trial/i, 'old courtroom priming is gone')
+  assert.doesNotMatch(p, /^You are a check on impulse\. The prosecution argues against the purchase;/m, 'old "check on impulse + prosecution argues against" priming is gone')
+  // The "rule based on whether the user has demonstrated a real,
+  // valid need" gatekeeper framing is replaced with the reflection
+  // framing. The substring "demonstrated a real" is still present
+  // (in the DEFAULT POSITION block as a positive framing) but the
+  // gatekeeper-tense line is gone.
+  assert.doesNotMatch(p, /You rule based on whether the user has demonstrated a real, valid need/i)
+})
+
 // === Prosecution prompt: conversational, not legal; brand/category shorthand ===
 //
 // Bug: the prosecution was talking like a courtroom lawyer ("Ladies
