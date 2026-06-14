@@ -225,9 +225,9 @@ export class PromptApiProvider implements AIProvider {
       // Both modes now use the same paragraph + ruling line shape.
       // The structured-mode option is kept for backwards compatibility
       // with stored settings; it no longer requires think/JSON.
-      'Write a single paragraph weighing the two arguments, then end with exactly one of these two lines on its own line: "I rule in favor of the purchase." or "I rule in favor of restraint." Nothing after the ruling line.'
+      'Weigh the two arguments above. Your analysis can ONLY reference arguments the prosecution or the defense ACTUALLY MADE in the transcript — do not invent facts, do not assume the user\'s motivations, do not fabricate arguments neither side made. If the defense wrote something like "I want it" and nothing else, that IS their entire argument — say so plainly. Then end with exactly one of these two lines on its own line: "I rule in favor of the purchase." or "I rule in favor of restraint." Nothing after the ruling line.'
 
-    const userPrompt = `${subjectLine}\n\nFULL TRANSCRIPT:\n${transcript}\n\n${tail}`
+    const userPrompt = `${subjectLine}\n\nFULL TRANSCRIPT (this is the ONLY evidence; you may not reference anything outside it):\n${transcript}\n\n${tail}`
 
     let text = await session.prompt(userPrompt)
     let verdict: Verdict | null = null

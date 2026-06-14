@@ -2,6 +2,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { TrialApp, type MountTrialProps } from './TrialApp'
 import trialCss from './trial.css?inline'
 import type { Cart } from '@/lib/ai/types'
+import { getTtsManager } from '@/lib/tts/content'
 
 export interface TrialController {
   focus(): void
@@ -11,6 +12,14 @@ export interface TrialController {
 export async function mountTrial(props: MountTrialProps): Promise<TrialController> {
   // 1. Remove any previous host to avoid stacking.
   document.querySelectorAll('[data-whybuy="1"]').forEach((el) => el.remove())
+
+  // 1a. Initialize TTS playback in this user-gesture context. The
+  // AudioContext must be created from a user gesture (the checkout
+  // click) to be allowed to play audio. We do this BEFORE mounting
+  // the React tree so the trial can render the "voice ready" state
+  // on the first frame.
+  const tts = getTtsManager()
+  void tts.start()
 
   // 2. Create host element.
   const host = document.createElement('div')
@@ -54,12 +63,17 @@ export async function mountTrial(props: MountTrialProps): Promise<TrialControlle
 
   // 7. Mount React.
   reactRoot = createRoot(root)
-  reactRoot.render(<TrialApp {...props} host={host} shadow={shadow} />)
+  reactRoot.render(<TrialApp {...props} host={host} shadow={shadow} tts={tts} />)
 
   // 8. Cleanup helpers.
   const close = () => {
     if (closed) return
     closed = true
+    // Interrupt any in-flight TTS so audio doesn't leak past the
+    // trial close.
+    try {
+      tts.interrupt()
+    } catch {}
     try {
       reactRoot?.unmount()
     } catch {}

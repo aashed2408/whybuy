@@ -716,6 +716,11 @@
   50%      { opacity: 1;   transform: scale(1.15); }
 }
 
+@keyframes whybuy-pulse {
+  0%, 100% { opacity: 0.45; transform: scale(0.9); }
+  50%      { opacity: 1;    transform: scale(1.15); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .whybuy-bench-calling .whybuy-bench-pulse { animation: none; opacity: 1; }
 }

@@ -394,9 +394,9 @@ export class BYOK implements AIProvider {
       .join('\n\n')
     const tail =
       this.judgeMode === 'natural'
-        ? 'Write a single paragraph weighing the two arguments, then end with exactly one of these two lines on its own line: "I rule in favor of the purchase." or "I rule in favor of restraint." Nothing after the ruling line.'
-        : 'Write a single paragraph weighing the two arguments, then end with exactly one of these two lines on its own line: "I rule in favor of the purchase." or "I rule in favor of restraint." Nothing after the ruling line.'
-    messages.push({ role: 'user', content: `FULL TRANSCRIPT:\n${transcript}\n\n${tail}` })
+        ? 'Weigh the two arguments above. Your analysis can ONLY reference arguments the prosecution or the defense ACTUALLY MADE in the transcript — do not invent facts, do not assume the user\'s motivations, do not fabricate arguments neither side made. If the defense wrote something like "I want it" and nothing else, that IS their entire argument — say so plainly. Then end with exactly one of these two lines on its own line: "I rule in favor of the purchase." or "I rule in favor of restraint." Nothing after the ruling line.'
+        : 'Weigh the two arguments above. Your analysis can ONLY reference arguments the prosecution or the defense ACTUALLY MADE in the transcript — do not invent facts, do not assume the user\'s motivations, do not fabricate arguments neither side made. If the defense wrote something like "I want it" and nothing else, that IS their entire argument — say so plainly. Then end with exactly one of these two lines on its own line: "I rule in favor of the purchase." or "I rule in favor of restraint." Nothing after the ruling line.'
+    messages.push({ role: 'user', content: `FULL TRANSCRIPT (this is the ONLY evidence; you may not reference anything outside it):\n${transcript}\n\n${tail}` })
     return messages
   }
 

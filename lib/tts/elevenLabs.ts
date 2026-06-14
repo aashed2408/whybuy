@@ -1,0 +1,155 @@
+/**
+ * ElevenLabs text-to-speech client.
+ *
+ * Two endpoints we care about:
+ *   POST /v1/text-to-speech/{voice_id}         → audio/mpeg (one-shot TTS)
+ *   GET  /v1/voices                            → list user's voices
+ *
+ * Auth is the `xi-api-key` header. The key is NEVER logged — we use
+ * a `keySet` boolean in any diagnostic output, just like the BYOK AI
+ * key on the rest of the extension.
+ *
+ * This module is pure HTTP. It does not touch the AudioContext or
+ * play anything — see `playback.ts` for that.
+ */
+
+/** Default voice: "Rachel" — calm, neutral, English. Stable since 2023. */
+export const DEFAULT_VOICE_ID = '21m00Tcm4TlvDq8ikWAM'
+/** Default model: turbo v2.5 — lowest latency, English-only. */
+export const DEFAULT_MODEL_ID = 'eleven_turbo_v2_5'
+
+export interface TtsRequest {
+  /** The user's ElevenLabs API key. Never logged. */
+  apiKey: string
+  /** Voice ID (e.g. '21m00Tcm4TlvDq8ikWAM'). */
+  voiceId: string
+  /** Model ID (e.g. 'eleven_turbo_v2_5'). */
+  modelId?: string
+  /** Text to speak. ElevenLabs limits to 5000 chars per request. */
+  text: string
+  /** Voice settings. Defaults are stable / similar to the voice's own. */
+  stability?: number
+  similarityBoost?: number
+  style?: number
+  useSpeakerBoost?: boolean
+  /** AbortSignal to cancel the fetch. */
+  signal?: AbortSignal
+}
+
+export interface Voice {
+  voice_id: string
+  name: string
+  category?: string
+  description?: string
+  labels?: Record<string, string>
+  preview_url?: string
+}
+
+/**
+ * Synthesize `text` to MP3 audio bytes.
+ *
+ * Returns an `ArrayBuffer` of `audio/mpeg`. The caller is responsible
+ * for decoding and playback (see `playback.ts`).
+ *
+ * Throws on:
+ *   - non-2xx response (the error message includes the HTTP status but
+ *     never the API key)
+ *   - network errors
+ *   - AbortError if the signal is aborted
+ */
+export async function elevenLabsTts(req: TtsRequest): Promise<ArrayBuffer> {
+  const { apiKey, voiceId, text, signal } = req
+  if (!apiKey) throw new Error('ElevenLabs API key is required')
+  if (!voiceId) throw new Error('ElevenLabs voice ID is required')
+  if (!text || !text.trim()) throw new Error('ElevenLabs TTS text is empty')
+
+  const url = `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}`
+  const modelId = req.modelId || DEFAULT_MODEL_ID
+  const body = {
+    text,
+    model_id: modelId,
+    voice_settings: {
+      stability: clamp01(req.stability ?? 0.5),
+      similarity_boost: clamp01(req.similarityBoost ?? 0.75),
+      style: clamp01(req.style ?? 0),
+      use_speaker_boost: req.useSpeakerBoost ?? true,
+    },
+  }
+
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'xi-api-key': apiKey,
+      'Content-Type': 'application/json',
+      Accept: 'audio/mpeg',
+    },
+    body: JSON.stringify(body),
+    signal,
+  })
+  if (!r.ok) {
+    // Read the error body for the message but never echo the api key.
+    const detail = await safeReadError(r)
+    if (r.status === 401) throw new Error('ElevenLabs: invalid API key (401)')
+    if (r.status === 429) throw new Error('ElevenLabs: rate limited (429) — try again shortly')
+    if (r.status === 402) throw new Error('ElevenLabs: subscription required or quota exceeded (402)')
+    throw new Error(`ElevenLabs TTS failed (${r.status}): ${detail}`)
+  }
+  return r.arrayBuffer()
+}
+
+/**
+ * List the user's available ElevenLabs voices (the "My Voices" tab on
+ * the dashboard). Used by the Options page voice picker. Returns
+ * built-in voices too if `includeShared = true` (default).
+ */
+export async function elevenLabsVoices(apiKey: string, signal?: AbortSignal): Promise<Voice[]> {
+  if (!apiKey) return []
+  const r = await fetch('https://api.elevenlabs.io/v1/voices?page_size=100', {
+    headers: { 'xi-api-key': apiKey, Accept: 'application/json' },
+    signal,
+  })
+  if (!r.ok) {
+    if (r.status === 401) throw new Error('ElevenLabs: invalid API key (401)')
+    throw new Error(`ElevenLabs voices failed (${r.status})`)
+  }
+  const data = (await r.json()) as { voices?: Voice[] }
+  return Array.isArray(data.voices) ? data.voices : []
+}
+
+/**
+ * Sanity-check an API key by hitting /v1/user. Returns the user's
+ * subscription tier on success (e.g. 'free', 'starter', 'creator',
+ * 'pro'), or null on failure. Used by the "Test" button in Options
+ * to confirm the key works without speaking a full sentence.
+ */
+export async function elevenLabsUserTier(apiKey: string, signal?: AbortSignal): Promise<string | null> {
+  if (!apiKey) return null
+  try {
+    const r = await fetch('https://api.elevenlabs.io/v1/user', {
+      headers: { 'xi-api-key': apiKey, Accept: 'application/json' },
+      signal,
+    })
+    if (!r.ok) return null
+    const data = (await r.json()) as { subscription?: { tier?: string } }
+    return data.subscription?.tier ?? 'free'
+  } catch {
+    return null
+  }
+}
+
+function clamp01(n: number): number {
+  if (!Number.isFinite(n)) return 0
+  if (n < 0) return 0
+  if (n > 1) return 1
+  return n
+}
+
+async function safeReadError(r: Response): Promise<string> {
+  try {
+    const t = await r.text()
+    if (t.length > 300) return t.slice(0, 300) + '…'
+    return t || '(no body)'
+  } catch {
+    return '(unreadable body)'
+  }
+}

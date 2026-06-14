@@ -2,7 +2,15 @@ import { useEffect, useState } from 'react'
 import { selectProvider, type AIProvider, type ByokConfig, type ByokProvider, type ProviderStatus } from '@/lib/ai/provider.ts'
 import { PromptApiProvider } from '@/lib/ai/promptApi.ts'
 import { BYOK } from '@/lib/ai/byok.ts'
-import { loadSettings, saveSettings, type Settings, type DebateLength, type Tone } from '@/lib/storage/settings.ts'
+import {
+  loadSettings,
+  saveSettings,
+  defaultVoiceConfig,
+  type Settings,
+  type DebateLength,
+  type Tone,
+  type VoiceConfig,
+} from '@/lib/storage/settings.ts'
 import {
   loadCooldowns,
   clearAllCooldowns,
@@ -13,6 +21,7 @@ import {
 import { loadHistory, clearHistory } from '@/lib/storage/history.ts'
 import { clearDebugCalls, loadDebugCalls, type DebugCallEntry } from '@/lib/ai/debug.ts'
 import type { JudgeMode, PromptDetail } from '@/lib/ai/types.ts'
+import { elevenLabsUserTier, elevenLabsVoices, type Voice, DEFAULT_VOICE_ID, DEFAULT_MODEL_ID } from '@/lib/tts/elevenLabs.ts'
 
 type StatusReport = {
   status: ProviderStatus
@@ -644,6 +653,21 @@ export function Options() {
         )}
       </Section>
 
+      <Section title="AI Voice (ElevenLabs TTS)">
+        <p style={{ color: 'rgba(247,238,215,0.65)', fontSize: 14, marginTop: 0 }}>
+          Optional. Add an ElevenLabs API key to have the prosecution and judge speak out loud during the trial. The
+          key is stored locally and is never logged or sent anywhere except ElevenLabs' API. Get a key at{' '}
+          <a href="https://elevenlabs.io/app/settings/api-keys" target="_blank" rel="noreferrer" style={{ color: '#e6c578' }}>
+            elevenlabs.io/app/settings/api-keys
+          </a>
+          .
+        </p>
+        {settings && <VoiceSection
+          voice={settings.voice ?? defaultVoiceConfig()}
+          onChange={(v) => updateSetting('voice', v)}
+        />}
+      </Section>
+
       <Section title="Active Cooldowns (by site)">
         <p style={{ color: 'rgba(247,238,215,0.65)', fontSize: 14, marginTop: 0 }}>
           Cooling-off periods are scoped per product+site. Declining a hat on Amazon does not block your eBay cart.
@@ -1208,6 +1232,257 @@ function DebugBlock({ label, body }: { label: string; body: string }) {
       >
         {body || '(empty)'}
       </pre>
+    </div>
+  )
+}
+
+/**
+ * Voice section. Manages the ElevenLabs TTS config: API key, voice,
+ * model, and volume. Mirrors the trial's VoiceButton behavior
+ * (the mute state is shared). API key is stored as a local-only
+ * chrome.storage field; never logged.
+ */
+function VoiceSection({
+  voice,
+  onChange,
+}: {
+  voice: VoiceConfig
+  onChange: (v: VoiceConfig) => void
+}) {
+  const [showKey, setShowKey] = useState(false)
+  const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle')
+  const [testMessage, setTestMessage] = useState<string>('')
+  const [voices, setVoices] = useState<Voice[] | null>(null)
+  const [voicesErr, setVoicesErr] = useState<string>('')
+
+  // Load the user's ElevenLabs voice list when the key changes
+  // (and is non-empty). Used to populate the voice picker.
+  useEffect(() => {
+    let cancelled = false
+    if (!voice.apiKey) {
+      setVoices(null)
+      setVoicesErr('')
+      return
+    }
+    setVoicesErr('')
+    elevenLabsVoices(voice.apiKey)
+      .then((v) => {
+        if (cancelled) return
+        setVoices(v)
+        if (v.length === 0) setVoicesErr('No voices returned by ElevenLabs. The key may be wrong.')
+      })
+      .catch((e) => {
+        if (cancelled) return
+        setVoicesErr(e?.message ?? 'Failed to load voices')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [voice.apiKey])
+
+  const updateKey = (next: string) => {
+    // Trim whitespace. We don't validate format — ElevenLabs will
+    // tell us when we Test. An empty key disables voice.
+    onChange({ ...voice, apiKey: next.trim() })
+    setTestStatus('idle')
+    setTestMessage('')
+  }
+
+  const test = async () => {
+    if (!voice.apiKey) return
+    setTestStatus('testing')
+    setTestMessage('')
+    const tier = await elevenLabsUserTier(voice.apiKey)
+    if (tier) {
+      setTestStatus('ok')
+      setTestMessage(`Connected to ElevenLabs — tier: ${tier}. Voice is ready.`)
+    } else {
+      setTestStatus('fail')
+      setTestMessage('Could not connect to ElevenLabs with that key. Check the value and try again.')
+    }
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {/* Master enable toggle */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <input
+          id="voice-enabled"
+          type="checkbox"
+          checked={voice.enabled}
+          onChange={(e) => onChange({ ...voice, enabled: e.target.checked })}
+          style={{ width: 18, height: 18, accentColor: '#c9a14a', cursor: 'pointer' }}
+        />
+        <label htmlFor="voice-enabled" style={{ fontSize: 14, color: '#f7eed7', cursor: 'pointer' }}>
+          Enable AI voice during the trial
+        </label>
+      </div>
+
+      {/* API key input */}
+      <div>
+        <div style={{ fontSize: 11, letterSpacing: '0.2em', textTransform: 'uppercase', color: '#c9a14a', marginBottom: 6 }}>
+          ElevenLabs API Key
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <input
+            type={showKey ? 'text' : 'password'}
+            value={voice.apiKey}
+            onChange={(e) => updateKey(e.target.value)}
+            placeholder="xi-api-key (paste from ElevenLabs dashboard)"
+            autoComplete="off"
+            spellCheck={false}
+            style={{
+              flex: 1,
+              padding: '8px 10px',
+              fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+              fontSize: 12,
+              background: 'rgba(15, 8, 4, 0.5)',
+              border: '1px solid rgba(201,161,74,0.4)',
+              borderRadius: 4,
+              color: '#f7eed7',
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => setShowKey((s) => !s)}
+            style={{
+              padding: '8px 12px',
+              fontSize: 11,
+              letterSpacing: '0.1em',
+              textTransform: 'uppercase',
+              background: 'transparent',
+              border: '1px solid rgba(201,161,74,0.3)',
+              color: '#e6c578',
+              borderRadius: 4,
+              cursor: 'pointer',
+            }}
+          >
+            {showKey ? 'Hide' : 'Show'}
+          </button>
+          <button
+            type="button"
+            onClick={test}
+            disabled={!voice.apiKey || testStatus === 'testing'}
+            style={{
+              padding: '8px 14px',
+              fontSize: 11,
+              letterSpacing: '0.1em',
+              textTransform: 'uppercase',
+              background: voice.apiKey ? 'rgba(201,161,74,0.18)' : 'rgba(247,238,215,0.05)',
+              border: `1px solid ${voice.apiKey ? 'rgba(201,161,74,0.7)' : 'rgba(201,161,74,0.2)'}`,
+              color: voice.apiKey ? '#e6c578' : 'rgba(247,238,215,0.4)',
+              borderRadius: 4,
+              cursor: voice.apiKey && testStatus !== 'testing' ? 'pointer' : 'not-allowed',
+            }}
+          >
+            {testStatus === 'testing' ? 'Testing…' : 'Test'}
+          </button>
+        </div>
+        {testStatus !== 'idle' && (
+          <div
+            style={{
+              marginTop: 8,
+              fontSize: 12,
+              color: testStatus === 'ok' ? '#7ec07e' : testStatus === 'fail' ? '#e08484' : '#e6c578',
+            }}
+          >
+            {testMessage}
+          </div>
+        )}
+      </div>
+
+      {/* Voice + model pickers */}
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+        <div style={{ flex: '1 1 240px' }}>
+          <div style={{ fontSize: 11, letterSpacing: '0.2em', textTransform: 'uppercase', color: '#c9a14a', marginBottom: 6 }}>
+            Voice
+          </div>
+          <select
+            value={voice.voiceId}
+            onChange={(e) => onChange({ ...voice, voiceId: e.target.value })}
+            disabled={!voices || voices.length === 0}
+            style={{
+              width: '100%',
+              padding: '8px 10px',
+              fontSize: 13,
+              background: 'rgba(15, 8, 4, 0.5)',
+              border: '1px solid rgba(201,161,74,0.4)',
+              borderRadius: 4,
+              color: '#f7eed7',
+              cursor: voices && voices.length > 0 ? 'pointer' : 'not-allowed',
+            }}
+          >
+            {voices && voices.length > 0 ? (
+              voices.map((v) => (
+                <option key={v.voice_id} value={v.voice_id}>
+                  {v.name}
+                  {v.category ? ` — ${v.category}` : ''}
+                  {v.labels?.accent ? ` (${v.labels.accent})` : ''}
+                </option>
+              ))
+            ) : (
+              <option value={voice.voiceId || DEFAULT_VOICE_ID}>
+                {voicesErr || 'Add an API key and click Test to load voices'}
+              </option>
+            )}
+          </select>
+        </div>
+        <div style={{ flex: '1 1 200px' }}>
+          <div style={{ fontSize: 11, letterSpacing: '0.2em', textTransform: 'uppercase', color: '#c9a14a', marginBottom: 6 }}>
+            Model
+          </div>
+          <select
+            value={voice.modelId}
+            onChange={(e) => onChange({ ...voice, modelId: e.target.value })}
+            style={{
+              width: '100%',
+              padding: '8px 10px',
+              fontSize: 13,
+              background: 'rgba(15, 8, 4, 0.5)',
+              border: '1px solid rgba(201,161,74,0.4)',
+              borderRadius: 4,
+              color: '#f7eed7',
+            }}
+          >
+            <option value="eleven_turbo_v2_5">Eleven Turbo v2.5 — English, lowest latency</option>
+            <option value="eleven_flash_v2_5">Eleven Flash v2.5 — 50% cheaper, slightly lower quality</option>
+            <option value="eleven_multilingual_v2">Eleven Multilingual v2 — supports 29 languages</option>
+          </select>
+        </div>
+      </div>
+
+      {/* Volume + mute */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <input
+          id="voice-mute"
+          type="checkbox"
+          checked={voice.muted}
+          onChange={(e) => onChange({ ...voice, muted: e.target.checked })}
+          style={{ width: 18, height: 18, accentColor: '#c9a14a', cursor: 'pointer' }}
+        />
+        <label htmlFor="voice-mute" style={{ fontSize: 13, color: '#f7eed7', cursor: 'pointer' }}>
+          Mute by default (toggle from the speaker button during a trial)
+        </label>
+      </div>
+      <div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, letterSpacing: '0.2em', textTransform: 'uppercase', color: '#c9a14a', marginBottom: 6 }}>
+          <span>Volume</span>
+          <span>{Math.round(voice.volume * 100)}%</span>
+        </div>
+        <input
+          type="range"
+          min={0}
+          max={100}
+          value={Math.round(voice.volume * 100)}
+          onChange={(e) => onChange({ ...voice, volume: Number(e.target.value) / 100 })}
+          style={{ width: '100%', accentColor: '#c9a14a' }}
+        />
+      </div>
+
+      <div style={{ fontSize: 11, color: 'rgba(247,238,215,0.5)', lineHeight: 1.5 }}>
+        Voice is rate-limited at ~10 requests/minute on the free ElevenLabs tier. Each sentence the AI speaks
+        counts as one request, so a full trial typically uses 4–10 requests.
+      </div>
     </div>
   )
 }

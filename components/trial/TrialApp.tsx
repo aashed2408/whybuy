@@ -12,6 +12,9 @@ import { IntroOverlay } from './IntroOverlay'
 import { UnsupportedOverlay } from './UnsupportedOverlay'
 import { CooldownGate } from './CooldownGate'
 import { ProductCardStack } from './ProductCard'
+import { VoiceButton } from './VoiceButton'
+import type { TtsManagerClass as TtsManager, TtsSubscriberState } from '@/lib/tts/content.ts'
+import { saveSettings } from '@/lib/storage/settings.ts'
 
 export interface TrialProps {
   product: Product
@@ -22,6 +25,8 @@ export interface TrialProps {
   /** Provided by mountTrial, not by callers. */
   host?: HTMLElement
   shadow?: ShadowRoot
+  /** TTS manager from the content script. Always provided. */
+  tts?: TtsManager
   onProceed?: () => void
   onAbandon?: (verdict: Verdict) => void
   onOverride?: (verdict: Verdict) => void
@@ -46,6 +51,7 @@ export function TrialApp(props: TrialProps) {
   const [aiTimedOut, setAiTimedOut] = useState<boolean>(false)
   const [callingAiSince, setCallingAiSince] = useState<number | null>(null)
   const [lastError, setLastError] = useState<string | null>(null)
+  const [ttsSnap, setTtsSnap] = useState<TtsSubscriberState | null>(props.tts ? props.tts.snapshot() : null)
   const portRef = useRef<chrome.runtime.Port | null>(null)
   const aiTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -60,6 +66,12 @@ export function TrialApp(props: TrialProps) {
   useEffect(() => {
     verdictRef.current = state.verdict
   }, [state.verdict])
+
+  // Subscribe to TTS state changes (muted, speaking, queue length).
+  useEffect(() => {
+    if (!props.tts) return
+    return props.tts.subscribe((s: TtsSubscriberState) => setTtsSnap(s))
+  }, [props.tts])
 
   // Cooldown countdown ticker.
   useEffect(() => {
@@ -116,6 +128,12 @@ export function TrialApp(props: TrialProps) {
         }
         setCallingAiSince(null)
         dispatch({ type: 'AI_STREAM', text: ev.text })
+        // Feed the new text into the TTS sentence buffer. The
+        // manager decides whether to actually call ElevenLabs based
+        // on the voice settings + a sentence terminator.
+        if (props.tts) {
+          void props.tts.enqueue(ev.text)
+        }
         break
       case 'STREAM_END':
         if (aiTimeoutRef.current) {
@@ -125,6 +143,11 @@ export function TrialApp(props: TrialProps) {
         setCallingAiSince(null)
         activeRequestIdRef.current = null
         dispatch({ type: 'AI_DONE', text: ev.text, speaker: 'prosecution' })
+        // Flush any final partial sentence so the AI's last words
+        // are spoken too.
+        if (props.tts) {
+          void props.tts.flush()
+        }
         break
       case 'JUDGE_REASONING_CHUNK':
         // The judge streamed a reasoning chunk. We don't display the
@@ -363,11 +386,15 @@ export function TrialApp(props: TrialProps) {
   }
 
   const handleUserSend = (text: string) => {
+    // The user just took the floor — stop any in-flight AI speech
+    // so the user can hear themselves type.
+    props.tts?.interrupt()
     dispatch({ type: 'USER_SEND', text })
   }
 
   const handleProceed = () => {
     if (!state.verdict) return
+    props.tts?.interrupt()
     dispatch({ type: 'USER_PROCEEDS' })
     props.onTranscript?.(state.transcript, state.verdict, 'proceeded-after-proceed')
     props.onProceed?.()
@@ -375,6 +402,7 @@ export function TrialApp(props: TrialProps) {
 
   const handleAcceptLoss = () => {
     if (!state.verdict) return
+    props.tts?.interrupt()
     dispatch({ type: 'USER_ACCEPTS_LOSS' })
     props.onTranscript?.(state.transcript, state.verdict, 'accepted-abandon')
     props.onAbandon?.(state.verdict)
@@ -382,13 +410,36 @@ export function TrialApp(props: TrialProps) {
 
   const handleOverride = () => {
     if (!state.verdict) return
+    props.tts?.interrupt()
     dispatch({ type: 'USER_OVERRIDES' })
     props.onTranscript?.(state.transcript, state.verdict, 'overridden-proceeded')
     props.onOverride?.(state.verdict)
   }
 
   const handleClose = () => {
+    props.tts?.interrupt()
     props.onClose?.()
+  }
+
+  /**
+   * Toggle the TTS mute. Persisted to settings so the choice
+   * survives across trials. The voice button's onClick feeds us
+   * the new desired muted state.
+   */
+  const handleTtsMuteToggle = async () => {
+    if (!props.tts) return
+    const next = !props.tts.isMuted()
+    props.tts.setMuted(next)
+    // Persist the new mute state.
+    try {
+      const raw = await chrome.storage.local.get('whybuy.settings.v1')
+      const cur = raw['whybuy.settings.v1'] || {}
+      const voice = cur.voice || null
+      if (voice) {
+        voice.muted = next
+        await saveSettings({ ...cur, voice })
+      }
+    } catch {}
   }
 
   // === Render branches ===
@@ -459,6 +510,12 @@ export function TrialApp(props: TrialProps) {
         enabled={isUserTurnNow}
       />
       {state.phase === 'intro' && <IntroOverlay product={state.product} cart={cart} />}
+      {props.tts && ttsSnap && (
+        <VoiceButton
+          snap={ttsSnap}
+          onToggleMute={handleTtsMuteToggle}
+        />
+      )}
       {aiTimedOut && (
         <div
           style={{

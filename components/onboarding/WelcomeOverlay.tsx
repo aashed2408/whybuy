@@ -60,6 +60,7 @@ export function WelcomeOverlay() {
             byok: null,
             promptDetail: 'minimal',
             judgeMode: 'natural',
+            voice: null,
           }),
           byok: cfg,
         }

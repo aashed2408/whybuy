@@ -24,12 +24,14 @@ export default defineContentScript({
       // Set up the click interceptor. Trial fires only when the user
       // explicitly clicks a "Checkout" / "Proceed to checkout" button.
       // No URL auto-trigger.
+      //
+      // `consumeSuppress` is checked BEFORE target matching and
+      // BEFORE preventDefault, so a re-dispatched click from
+      // `onProceed` or `onOverride` actually navigates to the
+      // checkout page (the previous design checked the counter
+      // AFTER preventDefault, which always blocked the re-dispatch).
       const removeInterceptor = installClickInterceptor(
         (result) => {
-          if (suppressNextClicks > 0) {
-            suppressNextClicks--
-            return
-          }
           const { product, cart } = extractSubject()
           void openTrial({
             product,
@@ -38,7 +40,16 @@ export default defineContentScript({
             source: 'click',
           })
         },
-        { hasActiveTrial: () => activeController != null },
+        {
+          hasActiveTrial: () => activeController != null,
+          consumeSuppress: () => {
+            if (suppressNextClicks > 0) {
+              suppressNextClicks--
+              return true
+            }
+            return false
+          },
+        },
       )
 
       ctx.onInvalidated(() => {
@@ -206,23 +217,49 @@ function extractSubject(): { product: Product; cart: Cart | null } {
  * actually navigates. Called from `onProceed` (proceed verdict) and
  * `onOverride` (abandon verdict + user disagrees).
  *
- * Implementation note: we use the element's native `.click()` method,
- * NOT a synthetic `MouseEvent` dispatched via `dispatchEvent`. A
- * synthetic event is observed by other listeners but does NOT trigger
- * the default action for `<a href>` links or form submit buttons, so
- * the page would never actually navigate to checkout. The native click
- * method runs the same handler chain as a real user click AND
- * executes the default action (link navigation / form submission).
+ * Three layers of fallback, in order:
  *
- * For `<a href>` elements we also fall back to setting `location.href`
- * directly, in case the original click had an event handler that
- * called `preventDefault()` (some Amazon checkout buttons do).
+ *  1. Native `.click()` on the original target. This runs the
+ *     element's own click handler chain AND executes the default
+ *     action (link navigation, form submit). For form-submit
+ *     elements (`<input type="submit">` / `<button type="submit">`),
+ *     this re-submits the surrounding `<form>`.
+ *
+ *  2. For submit-button targets whose ancestor `<form>` is still
+ *     present, we also call `form.submit()` directly. This bypasses
+ *     any on-page click handler that called `preventDefault()` and
+ *     forces the form to submit. (`.click()` does NOT call
+ *     `form.submit()` if a handler preventDefault'd the click.)
+ *
+ *  3. Final hard fallback: 250ms after the re-dispatch, if we're
+ *     still on the same origin AND still on a cart-like path, set
+ *     `location.href` to the link's href or the form's action URL.
+ *     This is the last resort for pages that aggressively
+ *     intercept the click (Amazon.ca is one of these).
+ *
+ * The click interceptor's `consumeSuppress` is bumped to 3 (not 1)
+ * to allow a brief window of multiple clicks through (e.g. if the
+ * form has a nested clickable element that fires its own click on
+ * submit). The bump is harmless: once we've navigated, the page
+ * unloads and the counter goes with it.
  */
 function reDispatch(event: MouseEvent, product: Product): void {
-  suppressNextClicks = 1
+  // Bump the suppress counter before any timing-dependent logic.
+  // consumeSuppress() decrements it. We bump to 3 because some
+  // pages fire multiple click events for a single user gesture
+  // (focus + click on the target, then click on a wrapping
+  // element, etc.). 3 is enough for the common cases without
+  // leaving a long window where the user could accidentally
+  // trigger a trial.
+  suppressNextClicks = 3
+
   const target = event.target as Element | null
   const href = target instanceof HTMLAnchorElement ? target.href : null
+  const form = target instanceof HTMLElement ? target.closest('form') : null
+  const formAction = form instanceof HTMLFormElement ? form.action : null
   const origin = location.origin
+  const pathBefore = location.pathname
+
   setTimeout(() => {
     try {
       if (target && document.contains(target)) {
@@ -230,19 +267,35 @@ function reDispatch(event: MouseEvent, product: Product): void {
         // .click() runs the element's own click handler AND executes
         // the default action (link navigation, form submit, etc.).
         ;(target as HTMLElement).click()
-        // Belt-and-suspenders for <a href> elements: if 100ms later
-        // we're still on the same origin, force-navigate. Some Amazon
-        // checkout buttons have an on-page click handler that calls
-        // preventDefault() before our interceptor can stop them, and
-        // .click() on such elements is a no-op for navigation.
-        if (href) {
-          setTimeout(() => {
-            if (location.origin === origin) {
-              log('Native .click() did not navigate; forcing location.href =', href)
-              location.href = href
-            }
-          }, 100)
+        // For submit-button targets, also call form.submit() to
+        // bypass any on-page click handler that called
+        // preventDefault(). form.submit() does NOT fire a submit
+        // event, so on-page handlers can't block it, and it
+        // immediately navigates to the form's action URL.
+        if (form && form instanceof HTMLFormElement && formAction) {
+          try {
+            log('Form-submit fallback: calling form.submit() for', product.name)
+            form.submit()
+          } catch (e) {
+            warn('form.submit() failed (expected for cross-origin forms):', e)
+          }
         }
+        // Final hard fallback: 250ms after the re-dispatch, if
+        // we're still on the same path AND same origin, force-
+        // navigate to the link's href or the form's action.
+        setTimeout(() => {
+          if (location.origin !== origin) return
+          if (location.pathname !== pathBefore) return
+          const target2 = href || formAction
+          if (target2) {
+            log('All click-based fallbacks failed; forcing location.href =', target2)
+            try {
+              location.href = target2
+            } catch (e) {
+              warn('location.href assignment failed:', e)
+            }
+          }
+        }, 250)
         return
       }
     } catch (e) {

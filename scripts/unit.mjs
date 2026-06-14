@@ -442,6 +442,33 @@ test('judge prompt: both modes produce the same output shape', () => {
   assert.equal(natural, structured)
 })
 
+test('judge prompt: hard rule against inventing facts', () => {
+  // The judge was hallucinating facts the user never said (e.g.
+  // "prioritized status over substance" for a user who only said
+  // "I want it"). The prompt must explicitly forbid fabrication.
+  const prompt = judgeSystemPrompt(sampleProduct, null, { judgeMode: 'natural' })
+  assert.match(prompt, /may ONLY reference what was actually said/i)
+  // Must explicitly forbid inventing facts and motivations.
+  assert.match(prompt, /invent facts about the product/i)
+  assert.match(prompt, /assume the user'?s motivations/i)
+  assert.match(prompt, /invent claims the defense never made/i)
+  assert.match(prompt, /fabricate/i)
+  // Must explicitly handle the "I want it" case (empty defense).
+  assert.match(prompt, /I want it.*nothing more/i)
+  // Must explicitly say the user prompt's transcript is the only
+  // evidence the judge can reference.
+  assert.match(prompt, /ONLY evidence/i)
+})
+
+test('judge prompt: tells the model to quote the user\'s words', () => {
+  // If the user wrote "I want it" verbatim, the judge should be
+  // able to reference that exact phrase rather than paraphrasing
+  // it into something the user never said.
+  const prompt = judgeSystemPrompt(sampleProduct, null, { judgeMode: 'natural' })
+  assert.match(prompt, /use their words if possible/i)
+  assert.match(prompt, /quote/i)
+})
+
 // === User-prompt must embed the product title (not just the system prompt) ===
 //
 // Small / non-reasoning models on Ollama Cloud (e.g. `ministral-3:8b`)
@@ -1485,4 +1512,88 @@ test('judgeSystemPrompt({judgeMode:"natural"}) also uses minimal subject', () =>
   assert.doesNotMatch(p, /Brand:/)
   assert.doesNotMatch(p, /Rating:/)
   assert.doesNotMatch(p, /reviews/)
+})
+
+// === SentenceBuffer (TTS chunk buffer) ===
+//
+// The TTS pipeline feeds the SentenceBuffer with raw streaming text
+// from the AI. The buffer emits complete sentences (split on `.`/`!`/`?`)
+// as soon as one terminates, and falls back to force-flushing long
+// run-on sentences. The judge paragraph + ruling line that the
+// TTS has to speak is the canonical input here.
+
+import { SentenceBuffer } from '../lib/tts/sentenceBuffer.ts'
+
+test('SentenceBuffer: emits a complete sentence on terminator', () => {
+  const b = new SentenceBuffer()
+  assert.equal(b.push('The court calls the'), null)
+  // First sentence ends at the period after "stand". The buffer
+  // returns the first sentence and holds the rest for the next push.
+  const first = b.push(' purchase of USB-C Hub to the stand. It is unnecessary.')
+  assert.equal(first, 'The court calls the purchase of USB-C Hub to the stand.')
+  // Second sentence is emitted on the NEXT push.
+  const second = b.push(' It is unjustifiable.')
+  assert.equal(second, 'It is unnecessary.')
+})
+
+test('SentenceBuffer: flush returns the final partial', () => {
+  const b = new SentenceBuffer()
+  b.push('This is the start of a sentence without a period')
+  assert.equal(b.flush(), 'This is the start of a sentence without a period')
+})
+
+test('SentenceBuffer: handles mid-word chunk splits', () => {
+  // A real AI might stream "Loui" then "s Vuitton" in two chunks.
+  // The buffer must not emit "Loui." prematurely.
+  const b = new SentenceBuffer()
+  assert.equal(b.push('The product is Loui'), null)
+  assert.equal(b.push('s Vuitton, an expensive bag. It is unnecessa'), 'The product is Louis Vuitton, an expensive bag.')
+  assert.equal(b.push('ry.'), 'It is unnecessary.')
+})
+
+test('SentenceBuffer: tolerates abbreviation periods', () => {
+  // "U.S.A." in the middle of a sentence has 3 periods within 5
+  // chars. The buffer should not split after any of them.
+  const b = new SentenceBuffer()
+  assert.equal(b.push('A product from the U.S.A.'), null)
+  assert.equal(b.push(' It is overpriced. The user can buy it.'), 'A product from the U.S.A. It is overpriced.')
+})
+
+test('SentenceBuffer: force-flushes long run-on sentences', () => {
+  // No terminator in 200+ chars. The buffer should still emit
+  // something on the push() so TTS doesn't have to wait forever.
+  // The emitted chunk is the first ~200 chars (up to the last
+  // whitespace in that window). The remainder is held for the
+  // next push / flush.
+  const b = new SentenceBuffer()
+  const long =
+    'A very long run-on sentence with no terminator at all that just keeps going and going and going and going and going and going and going and going and going and going and going and going and going and going and going and going and going and going and going and going and going and going and going and going and going and going and going and going and going and going'
+  const out = b.push(long)
+  assert.ok(out, 'expected the buffer to force-flush a chunk')
+  assert.ok(out.length > 100, `expected >100 chars, got ${out.length}`)
+  assert.match(out, /run-on sentence/, 'force-flushed chunk should include the start of the sentence')
+  // The remainder is in the buffer and can be flushed.
+  const rest = b.flush()
+  assert.ok(rest.length > 0, 'expected the rest to be in the buffer')
+})
+
+test('SentenceBuffer: handles empty input', () => {
+  const b = new SentenceBuffer()
+  assert.equal(b.push(''), null)
+  assert.equal(b.flush(), '')
+})
+
+test('SentenceBuffer: handles the judge paragraph shape', () => {
+  // The actual model output for the judge. Two complete sentences
+  // followed by the ruling line (no terminator — it's the last
+  // line). The buffer should emit each complete sentence.
+  const b = new SentenceBuffer()
+  const sent1 = b.push('The prosecution argues the cost outweighs the demonstrated need. ')
+  assert.equal(sent1, 'The prosecution argues the cost outweighs the demonstrated need.')
+  const sent2 = b.push("The defense's only argument was 'I want it' which is not a need. ")
+  assert.equal(sent2, "The defense's only argument was 'I want it' which is not a need.")
+  const sent3 = b.push('The prosecution made the stronger case.')
+  assert.equal(sent3, 'The prosecution made the stronger case.')
+  // The ruling line is emitted on the same push (period present).
+  assert.equal(b.push('I rule in favor of restraint.'), 'I rule in favor of restraint.')
 })
