@@ -30,18 +30,72 @@ WhyBuy is a Manifest V3 Chrome extension that runs a purchase through a structur
 | Visits a `/cart` or `/checkout` URL | **No auto-trigger** — the trial only fires when you click checkout |
 | Re-attempts a product on cooldown | Trial fires, displays the 24h cooldown notice |
 
-## Quick start (Ollama Cloud, free)
+## Install
 
-1. **Build the extension.** Requires Node 18+.
-   ```bash
-   npm install
-   npm run build
-   ```
-2. **Load it into Chrome.** Open `chrome://extensions`, enable **Developer mode**, click **Load unpacked**, and pick `.output/chrome-mv3/`.
-3. **Open the Options page.** Right-click the WhyBuy icon → "Options" (or click the icon and then "Settings").
-4. **Set up Ollama Cloud.** The Options page defaults to Ollama Cloud (free). Click **"Get a free key"** — it opens [ollama.com/settings/keys](https://ollama.com/settings/keys). Sign in, copy the key, paste it into the **API key** field, and click **Test connection**. The status should turn green.
-5. **Try it.** Visit any product page with a "Proceed to checkout" button (Amazon, a Shopify store, etc.) and click it. The courtroom will mount, the prosecution will speak, you argue back, and the judge will rule.
-6. **Inspect what the AI saw.** Back in Options, scroll to **"Last AI Prompts (debug)"** to see the exact prompt and response. Use this to verify the title and price reached the model.
+There are two ways to install WhyBuy. Pick whichever fits.
+
+### Option A — Easy install (no Node, no build)
+
+> **For most people.** Download a prebuilt bundle, load it as an unpacked extension. Three clicks. No terminal.
+
+1. Go to [**the latest release**](https://github.com/aashed2408/whybuy/releases/latest) and download:
+   - **`whybuy-*-chrome.zip`** for Chrome, Edge, Brave, Arc, Opera, or any other Chromium-based browser.
+   - **`whybuy-*-firefox.zip`** for Firefox.
+2. Extract the ZIP to a folder you won't accidentally delete (e.g. `C:\Users\you\Apps\whybuy` on Windows, `~/Apps/whybuy` on macOS/Linux).
+3. Open your browser's extensions page:
+   - **Chrome / Edge / Brave / Arc / Opera** — open `chrome://extensions` (or `edge://extensions`, `brave://extensions`, `arc://extensions`, `opera://extensions`).
+   - **Firefox** — open `about:debugging#/runtime/this-firefox`.
+4. Follow the [click-by-click install guide](./INSTALL.md#click-by-click) for your browser. Short version:
+   - **Chrome family** → toggle **Developer mode** (top-right) on → drag the extracted folder onto the page (or click **Load unpacked** and pick the folder).
+   - **Firefox** → click **Load Temporary Add-on…** → select `manifest.json` inside the extracted folder.
+5. Pin the WhyBuy icon to your toolbar so it stays visible.
+
+> **Firefox caveat.** A "Temporary Add-on" is removed when Firefox restarts. For a permanent install see [INSTALL.md → Permanent Firefox install](./INSTALL.md#permanent-firefox-install).
+
+### Option B — Build from source (one command)
+
+> **For developers and tinkerers.** Requires Node 18+. Builds the extension, then opens your browser's extensions page with the right click-by-click instructions.
+
+```bash
+git clone https://github.com/aashed2408/whybuy
+cd whybuy
+npm install
+npm run install:ext
+```
+
+What `npm run install:ext` does:
+
+1. Runs `npm install` and `npm run build` if you haven't already.
+2. Detects your platform (Windows / macOS / Linux).
+3. Prints the exact 3–4 click-by-click steps for your browser.
+4. Asks whether to open the extensions page in your default browser.
+
+Useful flags:
+
+```bash
+npm run install:ext -- --browser firefox   # Firefox instead of Chrome
+npm run install:ext -- --no-build          # skip the build (use an existing .output/)
+npm run install:ext -- --path ~/Downloads/whybuy-chrome   # use an extracted prebuilt folder
+```
+
+Equivalent on Windows without `npm`:
+
+```bat
+scripts\install
+```
+
+Equivalent on macOS / Linux:
+
+```bash
+./scripts/install.sh
+```
+
+## First-time setup (Ollama Cloud, free)
+
+1. **Open the Options page.** Right-click the WhyBuy icon → "Options" (or click the icon and then "Settings").
+2. **Set up Ollama Cloud.** The Options page defaults to Ollama Cloud (free). Click **"Get a free key"** — it opens [ollama.com/settings/keys](https://ollama.com/settings/keys). Sign in, copy the key, paste it into the **API key** field, and click **Test connection**. The status should turn green.
+3. **Try it.** Visit any product page with a "Proceed to checkout" button (Amazon, a Shopify store, etc.) and click it. The courtroom will mount, the prosecution will speak, you argue back, and the judge will rule.
+4. **Inspect what the AI saw.** Back in Options, scroll to **"Last AI Prompts (debug)"** to see the exact prompt and response. Use this to verify the title and price reached the model.
 
 > **Want zero setup?** Skip Ollama and let Chrome's built-in Prompt API run the trial on-device. No key, no network, no telemetry. Options → "Use Chrome AI instead".
 

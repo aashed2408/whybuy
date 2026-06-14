@@ -1,0 +1,78 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to publish under (e.g. v0.1.0). Leave blank for a dry run.'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build + attach browser bundles to release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm run test:unit
+
+      - name: Build Chrome bundle
+        run: npm run build
+
+      - name: Build Firefox bundle
+        run: npm run build:firefox
+
+      - name: Zip Chrome bundle
+        run: npm run zip
+
+      - name: Zip Firefox bundle
+        run: npm run zip:firefox
+
+      - name: Drop sources-only zip
+        # `wxt zip -b firefox` also produces a *-sources.zip that contains
+        # the full repo plus source maps. It is not useful to consumers and
+        # is ~9 MB. Remove it before publishing.
+        run: rm -f .output/whybuy-*-sources.zip
+
+      - name: Compute SHA-256 checksums
+        run: |
+          cd .output
+          sha256sum whybuy-*-chrome.zip whybuy-*-firefox.zip > checksums.txt
+          cat checksums.txt
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generate_release_notes: true
+          files: |
+            .output/whybuy-*-chrome.zip
+            .output/whybuy-*-firefox.zip
+            .output/checksums.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

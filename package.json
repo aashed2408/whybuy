@@ -25,7 +25,10 @@
     "test:product": "node scripts/product-fixture-test.mjs",
     "test:product-flow": "node scripts/product-flow.mjs",
     "test": "npm run test:unit && npm run build && npm run test:cart && npm run test:product && npm run test:checkout",
-    "load": "node scripts/load.mjs"
+    "load": "node scripts/load.mjs",
+    "install:ext": "node scripts/install.mjs",
+    "install:firefox": "node scripts/install.mjs --firefox --browser firefox",
+    "dist": "npm run zip && npm run zip:firefox"
   },
   "dependencies": {
     "react": "^18.3.1",

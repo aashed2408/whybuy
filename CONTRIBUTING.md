@@ -12,6 +12,7 @@ cd whybuy
 npm install
 npm run dev               # WXT dev server (auto-rebuilds)
 npm run build             # Build production bundle to .output/
+npm run install:ext       # Build + open your browser's extensions page (also runs the consumer installer)
 npm run load              # Launch Chrome with the extension pre-loaded (isolated profile)
 npm run typecheck         # tsc --noEmit
 npm run test:unit         # Unit tests (state machine, hashing, natural-judge parser, cooldowns)
@@ -27,7 +28,7 @@ The first build writes generated types into `.wxt/`. TypeScript and the WXT bund
 - `lib/intercept/` — product / cart extractors, click heuristic
 - `lib/storage/` — settings, history, cooldowns, onboarding
 - `lib/trial/` — debate state machine
-- `scripts/` — puppeteer e2e flows + the test-isolation helper
+- `scripts/` — puppeteer e2e flows + the test-isolation helper + the consumer installer (`install.mjs`)
 - `scripts/fixtures/` — deterministic HTML pages used by the e2e tests
 
 ## Conventions
