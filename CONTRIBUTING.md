@@ -4,7 +4,7 @@ Thanks for your interest in WhyBuy. This guide covers the dev setup, the testing
 
 ## Dev setup
 
-Requires **Node 18+** and a recent Chrome.
+Requires **Node 22.6+** and a recent Chrome. (Node 22.6 introduced `--experimental-strip-types`, which the unit-test runner uses to import `.ts` files directly without a transpile step.)
 
 ```bash
 git clone https://github.com/aashed2408/whybuy

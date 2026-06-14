@@ -15,7 +15,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # `--experimental-strip-types` is built into Node 22.6+
+          # and removes the need for a transpile step in the unit tests.
+          node-version: 22
           cache: npm
       - name: Install dependencies
         run: npm ci
