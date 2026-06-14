@@ -198,6 +198,19 @@
 
 .whybuy-textarea::placeholder { color: rgba(247,238,215,0.4); }
 
+.whybuy-mic-btn:hover { filter: brightness(1.1); }
+.whybuy-mic-btn:active { transform: scale(0.95); }
+.whybuy-mic-btn:disabled { cursor: not-allowed; }
+.whybuy-mic-btn:focus-visible {
+  outline: 2px solid rgba(201,161,74,0.6);
+  outline-offset: 2px;
+}
+
+@keyframes whybuy-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
 .whybuy-loss {
   background:
     radial-gradient(70% 60% at 50% 30%, rgba(138,28,43,0.4) 0%, transparent 60%),

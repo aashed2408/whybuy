@@ -6,10 +6,12 @@ import {
   loadSettings,
   saveSettings,
   defaultVoiceConfig,
+  defaultSttConfig,
   type Settings,
   type DebateLength,
   type Tone,
   type VoiceConfig,
+  type SttConfig,
 } from '@/lib/storage/settings.ts'
 import {
   loadCooldowns,
@@ -665,6 +667,21 @@ export function Options() {
         {settings && <VoiceSection
           voice={settings.voice ?? defaultVoiceConfig()}
           onChange={(v) => updateSetting('voice', v)}
+        />}
+      </Section>
+
+      <Section title="AI Speech-to-Text (ElevenLabs)">
+        <p style={{ color: 'rgba(247,238,215,0.65)', fontSize: 14, marginTop: 0 }}>
+          Optional. Dictate your defense arguments into the mic during a trial — the transcript
+          goes into the Composer for review before you submit. Uses the same{' '}
+          <span style={{ color: '#e6c578' }}>ElevenLabs API key</span> as the Voice section above
+          (Scribe v2 model, English). The key is stored locally and is never logged or sent
+          anywhere except ElevenLabs' API.
+        </p>
+        {settings && <SttSection
+          stt={settings.stt ?? defaultSttConfig()}
+          voiceKeySet={!!settings.voice?.apiKey}
+          onChange={(v) => updateSetting('stt', v)}
         />}
       </Section>
 
@@ -1500,6 +1517,83 @@ function VoiceSection({
       <div style={{ fontSize: 11, color: 'rgba(247,238,215,0.5)', lineHeight: 1.5 }}>
         Voice is rate-limited at ~10 requests/minute on the free ElevenLabs tier. Each sentence the AI speaks
         counts as one request, so a full trial typically uses 4–10 requests.
+      </div>
+    </div>
+  )
+}
+
+function SttSection({
+  stt,
+  voiceKeySet,
+  onChange,
+}: {
+  stt: SttConfig
+  voiceKeySet: boolean
+  onChange: (v: SttConfig) => void
+}) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {/* Master enable toggle */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <input
+          id="stt-enabled"
+          type="checkbox"
+          checked={stt.enabled}
+          onChange={(e) => onChange({ ...stt, enabled: e.target.checked })}
+          style={{ width: 18, height: 18, accentColor: '#c9a14a', cursor: 'pointer' }}
+        />
+        <label htmlFor="stt-enabled" style={{ fontSize: 14, color: '#f7eed7', cursor: 'pointer' }}>
+          Enable mic dictation during the trial
+        </label>
+      </div>
+
+      {/* Model picker */}
+      <div style={{ flex: '1 1 200px' }}>
+        <div style={{ fontSize: 11, letterSpacing: '0.2em', textTransform: 'uppercase', color: '#c9a14a', marginBottom: 6 }}>
+          Scribe model
+        </div>
+        <select
+          value={stt.modelId}
+          onChange={(e) => onChange({ ...stt, modelId: e.target.value as SttConfig['modelId'] })}
+          style={{
+            width: '100%',
+            padding: '8px 10px',
+            fontSize: 13,
+            background: 'rgba(15, 8, 4, 0.5)',
+            border: '1px solid rgba(201,161,74,0.4)',
+            borderRadius: 4,
+            color: '#f7eed7',
+            cursor: 'pointer',
+          }}
+        >
+          <option value="scribe_v2">Scribe v2 — best quality (default)</option>
+          <option value="scribe_v1">Scribe v1 — older, cheaper</option>
+        </select>
+      </div>
+
+      {!voiceKeySet && (
+        <div
+          style={{
+            background: 'rgba(201,161,74,0.08)',
+            border: '1px solid rgba(201,161,74,0.3)',
+            borderRadius: 6,
+            padding: '10px 12px',
+            fontSize: 12,
+            color: 'rgba(247,238,215,0.8)',
+            lineHeight: 1.5,
+          }}
+        >
+          <strong style={{ color: '#e6c578' }}>Heads up:</strong> STT needs an ElevenLabs API key
+          to be set in the AI Voice section above. Add one there first, then come back and enable
+          STT.
+        </div>
+      )}
+
+      <div style={{ fontSize: 11, color: 'rgba(247,238,215,0.5)', lineHeight: 1.5 }}>
+        How it works: click the mic in the Composer, speak, click again to stop. Your speech is
+        sent to ElevenLabs Scribe, the transcript appears in the Composer for you to review, and
+        you press Submit to send it to the AI. Audio is held only for the duration of the request.
+        Each request costs ~1 second of audio at the Scribe v2 rate.
       </div>
     </div>
   )

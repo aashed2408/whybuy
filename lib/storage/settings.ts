@@ -1,5 +1,7 @@
-import type { ByokConfig, ByokProvider, JudgeMode, PromptDetail } from '@/lib/ai/types.ts'
-import { DEFAULT_VOICE_ID, DEFAULT_MODEL_ID } from '@/lib/tts/elevenLabs.ts'
+import type { ByokConfig, ByokProvider, JudgeMode, PromptDetail } from '../ai/types.ts'
+import { DEFAULT_VOICE_ID, DEFAULT_MODEL_ID } from '../tts/elevenLabs.ts'
+
+import type { SttModelId } from '../stt/elevenLabs.ts'
 
 export type DebateLength = 'short' | 'standard' | 'long'
 export type Tone = 'firm' | 'socratic' | 'sardonic'
@@ -41,6 +43,18 @@ export interface VoiceConfig {
   similarityBoost: number
 }
 
+/**
+ * ElevenLabs speech-to-text configuration. STT reuses the API
+ * key stored in `VoiceConfig` (we don't store it twice). The
+ * key is NEVER logged — diagnostic output uses `voice.keySet` only.
+ */
+export interface SttConfig {
+  /** Master switch — false = no STT button even if key is set. */
+  enabled: boolean
+  /** Scribe model. 'scribe_v2' is the default (best quality). */
+  modelId: SttModelId
+}
+
 export interface Settings {
   debateLength: DebateLength
   tone: Tone
@@ -66,6 +80,13 @@ export interface Settings {
    * Voice section for the first time).
    */
   voice: VoiceConfig | null
+  /**
+   * ElevenLabs STT config. `null` until the user opts in (the
+   * Options page creates a default config when the user opens the
+   * Speech-to-Text section for the first time). Reuses the API
+   * key from `voice`.
+   */
+  stt: SttConfig | null
 }
 
 const KEY = 'whybuy.settings.v1'
@@ -86,6 +107,11 @@ const DEFAULT_VOICE: VoiceConfig = {
   similarityBoost: 0.75,
 }
 
+const DEFAULT_STT: SttConfig = {
+  enabled: false,
+  modelId: 'scribe_v2',
+}
+
 const DEFAULTS: Settings = {
   debateLength: 'standard',
   tone: 'firm',
@@ -94,6 +120,7 @@ const DEFAULTS: Settings = {
   promptDetail: 'minimal',
   judgeMode: 'natural',
   voice: null,
+  stt: null,
 }
 
 export async function loadSettings(): Promise<Settings> {
@@ -113,7 +140,9 @@ export async function loadSettings(): Promise<Settings> {
   // defaults for any missing field, but NEVER auto-create a config
   // (the user must opt in via the Options page).
   const voice: VoiceConfig | null = normalizeVoice(obj.voice)
-  return { ...DEFAULTS, ...obj, byok, promptDetail, judgeMode, voice }
+  // Normalize STT config: same opt-in policy. Reuses the voice key.
+  const stt: SttConfig | null = normalizeStt(obj.stt)
+  return { ...DEFAULTS, ...obj, byok, promptDetail, judgeMode, voice, stt }
 }
 
 export async function saveSettings(next: Settings): Promise<void> {
@@ -158,6 +187,25 @@ export function normalizeVoice(raw: unknown): VoiceConfig | null {
 
 export function defaultVoiceConfig(): VoiceConfig {
   return { ...DEFAULT_VOICE }
+}
+
+/**
+ * Build a safe `SttConfig` from arbitrary input. Tolerates missing
+ * fields and unknown model IDs by falling back to the defaults.
+ * Returns null if the input is explicitly null.
+ */
+export function normalizeStt(raw: unknown): SttConfig | null {
+  if (raw == null) return null
+  if (typeof raw !== 'object') return { ...DEFAULT_STT }
+  const o = raw as Partial<SttConfig>
+  return {
+    enabled: !!o.enabled,
+    modelId: o.modelId === 'scribe_v1' ? 'scribe_v1' : 'scribe_v2',
+  }
+}
+
+export function defaultSttConfig(): SttConfig {
+  return { ...DEFAULT_STT }
 }
 
 function clamp01(n: number): number {

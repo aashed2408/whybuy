@@ -15,6 +15,7 @@ import { ProductCardStack } from './ProductCard'
 import { VoiceButton } from './VoiceButton'
 import type { TtsManagerClass as TtsManager, TtsSubscriberState } from '@/lib/tts/content.ts'
 import { saveSettings } from '@/lib/storage/settings.ts'
+import { getSttManager, type SttManager } from '@/lib/stt/content.ts'
 
 export interface TrialProps {
   product: Product
@@ -52,12 +53,23 @@ export function TrialApp(props: TrialProps) {
   const [callingAiSince, setCallingAiSince] = useState<number | null>(null)
   const [lastError, setLastError] = useState<string | null>(null)
   const [ttsSnap, setTtsSnap] = useState<TtsSubscriberState | null>(props.tts ? props.tts.snapshot() : null)
+  const [textDraft, setTextDraft] = useState<string>('')
   const portRef = useRef<chrome.runtime.Port | null>(null)
   const aiTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const activeRequestIdRef = useRef<string | null>(null)
   const transcriptRef = useRef<ChatMessage[]>([])
   const verdictRef = useRef<Verdict | null>(null)
+  // STT manager is a content-script singleton. We only need a
+  // reference for the Composer (which passes it to MicButton).
+  const sttManagerRef = useRef<SttManager | null>(null)
+  if (sttManagerRef.current === null) {
+    try {
+      sttManagerRef.current = getSttManager()
+    } catch {
+      sttManagerRef.current = null
+    }
+  }
 
   // Keep ref in sync for the close handler.
   useEffect(() => {
@@ -389,6 +401,10 @@ export function TrialApp(props: TrialProps) {
     // The user just took the floor — stop any in-flight AI speech
     // so the user can hear themselves type.
     props.tts?.interrupt()
+    // Also cancel any in-flight STT recording so the mic stream
+    // is released before the next AI turn.
+    sttManagerRef.current?.cancel()
+    setTextDraft('')
     dispatch({ type: 'USER_SEND', text })
   }
 
@@ -526,10 +542,13 @@ export function TrialApp(props: TrialProps) {
         cart={cart}
       />
       <Composer
+        value={textDraft}
+        onChange={setTextDraft}
         onSend={handleUserSend}
         round={state.round + (isUserTurnNow ? 1 : 0)}
         totalRounds={TOTAL_ROUNDS}
         enabled={isUserTurnNow}
+        sttManager={sttManagerRef.current}
       />
       {state.phase === 'intro' && <IntroOverlay product={state.product} cart={cart} />}
       {props.tts && ttsSnap && (
