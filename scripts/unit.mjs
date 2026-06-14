@@ -500,8 +500,11 @@ test('judge prompt: requires the model to evaluate whether the user has demonstr
   // must require the judge to name the need (or name its absence).
   const prompt = judgeSystemPrompt(sampleProduct, null, { judgeMode: 'natural' })
   assert.match(prompt, /demonstrate a real need|did the user demonstrate a real need|articulated a real/i)
-  // Must classify bare "I want it" as a want, not a need.
-  assert.match(prompt, /"I want it".*want.*not a need|with no specifics is a want/i)
+  // Must classify bare "I want it" as a want, not a need (in the
+  // A want is: list). The new framing still lists "I want it" as a
+  // want — but a deliberate choice is also acknowledged as a valid
+  // reason to proceed.
+  assert.match(prompt, /"I want it" \(alone, with no specifics\)|"I want it".*alone.*no specifics|"I want it" \(alone/i)
   // Must list specific use cases as needs.
   assert.match(prompt, /specific use case.*need|use case.*exists today/i)
 })
@@ -2706,17 +2709,17 @@ test('VoiceConfig defaults include playbackRate 1.5 and speed 1.2 (verified via 
 //     justification on its own
 //   - Default to restraint when the user only said "I want it"
 
-test('judge prompt: a want is explicitly NOT a need (but a deliberate unarticulate choice wins at low confidence)', () => {
+test('judge prompt: a want is explicitly NOT a need (but a deliberate unarticulate choice wins ~50% of the time)', () => {
   const p = judgeSystemPrompt(product, null, { judgeMode: 'natural' })
-  assert.match(p, /WANT IS NOT A NEED|want is not a need/i)
-  // "I want it" alone must be classified as a want, not a need.
-  assert.match(p, /"I want it".*want.*not a need|"I want it" is a want|"I want it" \(alone, with no specifics\)/i)
-  // "I want it" alone is NOT an absolute loss — the user picked it deliberately.
-  // The defense can still win at moderate confidence (the user is making a
-  // deliberate choice, just not an articulate one).
-  assert.match(p, /bare "I want it".*defense can still win|defense can still win at moderate confidence|deliberate, unarticulate choice/i)
-  // Confidence range for the bare-I-want-it case is explicitly calibrated.
-  assert.match(p, /0\.55.*0\.65|0\.55.{0,5}.{0,5}0\.65/i)
+  // "I want it" alone is still classified as a want, not a need.
+  assert.match(p, /"I want it" \(alone, with no specifics\)|"I want it".*alone.*no specifics|"I want it".*want.*not a need/i)
+  // The new framing: a deliberate choice is a valid reason to
+  // proceed. The user picked it deliberately, so the defense can
+  // still win — at ~5 in 10 trials.
+  assert.match(p, /deliberate choice.*valid reason|~5 in 10|roughly half|DEFAULT PURCHASE at 0\.55-0\.65/i)
+  // Confidence range for the bare-I-want-it case is explicitly
+  // calibrated to 0.55-0.65 (~50/50 between purchase and restraint).
+  assert.match(p, /0\.55-0\.65|0\.55.{0,5}.{0,5}0\.65/i)
 })
 
 test('judge prompt: lists specific use cases as needs', () => {
@@ -2732,12 +2735,14 @@ test('judge prompt: removes the "default to restraint" boilerplate and replaces 
   // The previous default-to-restraint rule is gone.
   assert.doesNotMatch(p, /If neither side is compelling, default to "I rule in favor of restraint"/i)
   assert.doesNotMatch(p, /A cautious ruling is better than a false positive/i)
-  // The new ruling is need-based: "restraint" when the user did
-  // not articulate a real need, with a SPECIFIC, transcript-anchored
-  // prosecution counter-case as a precondition.
-  assert.match(p, /"restraint" = the user did not articulate a real need|did not articulate a real need/i)
-  // The new "presumption in favor of demonstrated needs" rule.
+  // The new "restraint" definition requires a STRONG, SPECIFIC,
+  // TRANSCRIPT-ANCHORED counter-case the user did not address.
+  // Generic "this seems expensive" is NOT enough.
+  assert.match(p, /"restraint" = the prosecution made a STRONG, TRANSCRIPT-ANCHORED counter-case/i)
+  // The new "presumption in favor of demonstrated needs" rule is in.
   assert.match(p, /PRESUMPTION IN FAVOR OF DEMONSTRATED NEEDS/i)
+  // The new "DEFAULT POSITION: TRUST THE USER" block is in.
+  assert.match(p, /DEFAULT POSITION: TRUST THE USER/i)
   // The prosecution must overcome a demonstrated need with a
   // specific, transcript-anchored case.
   assert.match(p, /SPECIFIC,? TRANSCRIPT-ANCHORED counter-case|SPECIFIC, TRANSCRIPT-ANCHORED counter-case/i)
@@ -2898,6 +2903,121 @@ DECISIVE FACTORS:
   // (They may not all be in seen if some round to the same value,
   // but most should be distinct.)
   assert.ok(seen.size >= 5, `expected at least 5 distinct confidences, got ${seen.size}: ${[...seen].join(', ')}`)
+})
+
+// === NEW: prosecution reframe — the AI is on the user's side, not opposing ===
+//
+// The user reported: "The prosecution AI is kinda saying random stuff.
+// It's meant to help you make a good purchase, not argue against you."
+// The fix is to reframe the prosecution's GOAL from adversarial to
+// helpful. The role is still "prosecution" (the user wanted to keep
+// the courtroom framing), but the AI's job is now to help the user
+// think through the decision, not to talk them out of it.
+
+test('prosecution prompt: AI\'s goal is to help, not oppose', () => {
+  const p = prosecutionSystemPrompt(sampleProduct, null, { detail: 'minimal' })
+  // The old adversarial goal "talk them out of it" is gone.
+  assert.doesNotMatch(p, /talk them out of it/i, 'old adversarial goal is gone')
+  assert.doesNotMatch(p, /you think it's a bad idea/i, "old it's a bad idea framing is gone")
+  // The new helpful goal is in.
+  assert.match(p, /help them make a good decision/i)
+  assert.match(p, /help them think through it/i)
+  // A new YOUR GOAL section is present with bullet points.
+  assert.match(p, /YOUR GOAL/i)
+  assert.match(p, /on the user's side/i)
+  assert.match(p, /never try to "win"/i)
+})
+
+// === NEW: judge prompt — DEFAULT POSITION is to trust the user, not restraint ===
+
+test('judge prompt: DEFAULT POSITION is to trust the user (not default to restraint)', () => {
+  const p = judgeSystemPrompt(product, null, { judgeMode: 'natural' })
+  // The new "DEFAULT POSITION: TRUST THE USER" block is present.
+  assert.match(p, /DEFAULT POSITION: TRUST THE USER/)
+  // The prompt explicitly says "lean toward proceed" when in doubt.
+  assert.match(p, /When in doubt, lean toward "proceed"/i)
+  // The "WHEN IN DOUBT, LEAN PROCEED" footer is there.
+  assert.match(p, /WHEN IN DOUBT, LEAN PROCEED/i)
+  // The old "want is not a need BY DEFAULT" framing is gone
+  // (replaced by "a deliberate choice is a valid reason to proceed").
+  assert.doesNotMatch(p, /want is not a need by default/i)
+  // The new framing is in: deliberate choice is a valid reason.
+  assert.match(p, /deliberate choice is a valid reason to proceed/i)
+})
+
+// === NEW: judge prompt — DECISION TABLE with the new calibration ===
+
+test('judge prompt: DECISION TABLE maps concrete use case to PURCHASE at 0.85+', () => {
+  const p = judgeSystemPrompt(product, null, { judgeMode: 'natural' })
+  // The DECISION TABLE is present.
+  assert.match(p, /DECISION TABLE/i)
+  // The strong-proceed row is there.
+  assert.match(p, /Concrete use case.*No specific counter.*PURCHASE.*0\.85\+/i)
+  // The "I want it" alone row is there with 0.55-0.65.
+  assert.match(p, /Only "I want it".*Generic or no counter.*PURCHASE.*0\.55-0\.65/i)
+  // The strong-prosecution row is there.
+  assert.match(p, /Only "I want it".*Strong specific counter.*RESTRAINT.*0\.65-0\.85/i)
+  // The lean-either-way row is there.
+  assert.match(p, /Strong specific counter the user did not address.*lean either way.*0\.55-0\.75/i)
+})
+
+// === NEW: judge prompt — "I want it" alone is 50% win rate (was 30% / 3 in 10) ===
+
+test('judge prompt: bare "I want it" alone is 50% win rate (not 30% / 3 in 10)', () => {
+  const p = judgeSystemPrompt(product, null, { judgeMode: 'natural' })
+  // The new 50% framing is present.
+  assert.match(p, /~5 in 10|roughly half|50\/?50/i)
+  // The old 30% framing is gone.
+  assert.doesNotMatch(p, /3 in 10 bare/i, 'old 30% framing is gone')
+  assert.doesNotMatch(p, /Roughly 3 in 10/i, 'old 30% framing is gone')
+  // The confidence range is now 0.55-0.65 (was 0.55-0.65, kept
+  // similar but the meaning changed: was "unarticulate choice",
+  // now "~50/50 between purchase and restraint").
+  assert.match(p, /0\.55-0\.65/)
+})
+
+// === NEW: judge prompt — removes the "silence is not a defense argument" rule ===
+
+test('judge prompt: removes the "silence is not a defense" rule (deliberate "I want it" IS an argument)', () => {
+  const p = judgeSystemPrompt(product, null, { judgeMode: 'natural' })
+  // The new framing: a deliberate "I want it" IS an argument.
+  assert.match(p, /A deliberate "I want it" IS an argument/i)
+  // The old "silence is not a defense" rule is gone.
+  assert.doesNotMatch(p, /Silence \/ non-engagement is not a defense argument/i)
+  // The "user did not provide a defense" boilerplate is gone
+  // (it was used to justify default restraint when user said nothing).
+  assert.doesNotMatch(p, /the user did not provide a defense/i)
+  // The "Treat silence as a defense argument" line is also gone
+  // (it appeared in both YOUR ROLE / THE RECORD).
+  assert.doesNotMatch(p, /Treat silence as a defense argument/i)
+})
+
+// === NEW: verdict varies demo — real need + strong counter leans either way ===
+
+test('verdict varies: real need + strong counter → leans either way (0.55-0.75)', () => {
+  // The user has a real, specific need (current headphones broken,
+  // work-from-home use case). The prosecution made a strong
+  // specific counter (a much cheaper alternative at the same
+  // quality, plus a durability concern). The user did not address
+  // the counter. The verdict should lean either way at 0.55-0.75.
+  const raw = `The user said their current headphones broke and they need a replacement for work-from-home video calls. The prosecution made two specific points: there is a much cheaper alternative at $60 with the same features, and this model's hinge is known to fail within 18 months. The user did not address either point.
+
+CONFIDENCE: 0.65
+I rule in favor of restraint.
+
+DECISIVE FACTORS:
+- Defense: current headphones broken, needs replacement
+- Prosecution: named a specific cheaper alternative at $60
+- Prosecution: hinge durability issue with this specific model`
+  const v = verdictFromNatural(parseNaturalVerdict(raw))
+  assert.equal(v.decision, 'abandon')
+  // The confidence is in the lean-either-way range (0.55-0.75),
+  // not the strong-proceed range (0.85+) and not the strong-restraint
+  // range (0.7-0.85).
+  assert.ok(
+    v.confidence >= 0.55 && v.confidence <= 0.75,
+    `expected 0.55-0.75 (lean either way), got ${v.confidence}`,
+  )
 })
 
 // === Prosecution prompt: conversational, not legal; brand/category shorthand ===
