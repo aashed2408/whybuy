@@ -116,9 +116,12 @@ export function extractAmazonCart(): Cart | null {
     const asin = el.getAttribute('data-asin')
     if (asin && asin.length < 5) continue // skip non-product rows
 
+    // The cart title link is the most stable place. On the redesigned
+    // cart, it's the `<a>` inside `.sc-product-title` (or just an
+    // `<a.a-link-normal>` with a `/dp/ASIN` href). We try in priority
+    // order so we always get the cleanest possible string.
     const name =
-      el.querySelector('.a-truncate-cut, .a-link-normal span.a-truncate, .sc-product-title, h2, h3, .a-size-base-plus')?.textContent?.trim() ||
-      el.querySelector('a span')?.textContent?.trim() ||
+      pickAmazonCartItemName(el) ||
       ''
     // The price div may contain BOTH a strikethrough was-price AND the
     // current price, both as `.a-offscreen`. Pick the LAST one (the
@@ -241,6 +244,49 @@ function dedupeElements(els: HTMLElement[]): HTMLElement[] {
     out.push(el)
   }
   return out
+}
+
+/**
+ * Pick the visible text of the cart-item name. Amazon's cart page
+ * renders the title in several places (.sc-product-title, the link
+ * text, the truncated text, etc.) and some of them are doubled
+ * (visible + screen-reader-only). The cleanest path is the link that
+ * points to the product page — its visible text is just the title.
+ */
+function pickAmazonCartItemName(row: HTMLElement): string {
+  const candidates = [
+    '.sc-product-title a',
+    '.sc-product-title',
+    'a.a-link-normal[href*="/dp/"] span.a-truncate',
+    'a.a-link-normal[href*="/dp/"]',
+    '.a-truncate-cut',
+    '.a-link-normal span.a-truncate',
+    'h2',
+    'h3',
+  ]
+  for (const sel of candidates) {
+    const el = row.querySelector(sel)
+    if (!el) continue
+    const t = visibleTextOf(el)
+    if (t && t.length >= 3) return t
+  }
+  return ''
+}
+
+/**
+ * Return the visible (non-screen-reader-only) text of an element.
+ * Mirrors the same helper in `product.ts` so both extractors strip
+ * " Opens in a new tab" and other a11y-only spans.
+ */
+function visibleTextOf(el: Element): string {
+  const clone = el.cloneNode(true) as Element
+  const hidden = clone.querySelectorAll(
+    '[aria-hidden="true"], .a-offscreen, .aok-hidden, ' +
+      '.visually-hidden, .sr-only, .screen-reader-only, ' +
+      '[style*="display: none" i], [style*="visibility: hidden" i]',
+  )
+  hidden.forEach((n) => n.remove())
+  return (clone.textContent || '').replace(/\s+/g, ' ').trim()
 }
 
 function dedupeItems(items: CartItem[]): CartItem[] {

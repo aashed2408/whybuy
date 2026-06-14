@@ -49,9 +49,17 @@ export interface JudgePromptOptions {
 export function prosecutionSystemPrompt(product: Product, cart: Cart | null, opts: ProsecutionPromptOptions = {}): string {
   const detail: PromptDetail = opts.detail === 'rich' ? 'rich' : 'minimal'
   const subject = describeSubject(product, cart, detail)
-  const productTitle = product.name
-  const priceStr = formatCurrency(product.price, product.currency)
+  // On a single-item cart, the cart item IS the product for the
+  // purpose of the trial. Use its name/price as the primary subject
+  // so the model isn't arguing against "Cart" / "Shopping Cart"
+  // (the page's h1, which the product extractor falls back to).
+  const primaryItem = cart && cart.items.length === 1 ? cart.items[0] : null
+  const productTitle = primaryItem?.name?.trim() || product.name
+  const priceStr = primaryItem
+    ? formatCurrency(primaryItem.price ?? cart!.total, primaryItem.currency || cart!.currency)
+    : formatCurrency(product.price, product.currency)
   const site = product.domain
+  const isCart = !!(cart && cart.items.length > 0)
   return `You are the Opposing Counsel in a courtroom debate over whether the user should proceed with a specific purchase.
 
 THE PRODUCT ON TRIAL (your entire frame of reference)
@@ -128,7 +136,27 @@ export function judgeSystemPrompt(product: Product, cart: Cart | null, opts: Jud
   if (judgeMode === 'natural') {
     return naturalJudgePrompt(subject)
   }
+  // For the structured judge, use the cart item's product details when
+  // there's a single-item cart (so the rich card shows the cart item's
+  // brand/rating/prime rather than a generic product page's).
+  if (cart && cart.items.length === 1) {
+    const item = cart.items[0]
+    return structuredJudgePromptFromItem(item, product, cart, subject)
+  }
   return structuredJudgePrompt(product, cart, subject)
+}
+
+/**
+ * Variant of the structured judge prompt that pulls brand/rating/etc.
+ * from a cart item instead of the product. Used for single-item carts
+ * where the product is really just the cart item.
+ */
+function structuredJudgePromptFromItem(item: import('./types.ts').CartItem, product: Product, cart: Cart, subject: string): string {
+  return structuredJudgePromptWithItem(item, product, cart, subject)
+}
+
+function structuredJudgePrompt(product: Product, cart: Cart | null, subject: string): string {
+  return structuredJudgePromptWithItem(null, product, cart, subject)
 }
 
 function naturalJudgePrompt(subject: string): string {
@@ -163,12 +191,42 @@ Rules:
 - If you are unsure, default to "abandon" with confidence 0.5. It is far better to issue a cautious ruling than to fail to deliver the five lines.`
 }
 
-function structuredJudgePrompt(product: Product, cart: Cart | null, subject: string): string {
+function structuredJudgePromptWithItem(
+  item: import('./types.ts').CartItem | null,
+  product: Product,
+  cart: Cart | null,
+  subject: string,
+): string {
+  // Pull brand/rating/etc. from the cart item when we have one (so
+  // single-item-cart trials show the cart item's real signals).
+  const d = item?.details
+  const brand = d?.brand ?? product.brand
+  const rating = d?.rating ?? product.rating
+  const reviewCount = d?.reviewCount ?? product.reviewCount
+  const prime = d?.prime ?? product.prime
+  const signalLines: string[] = []
+  if (brand) signalLines.push(`Brand: ${brand}`)
+  if (rating != null) {
+    const stars = '★'.repeat(Math.round(rating)) + '☆'.repeat(5 - Math.round(rating))
+    const reviewPart = reviewCount != null ? ` (${reviewCount.toLocaleString()} reviews)` : ''
+    signalLines.push(`Rating: ${rating} ${stars}${reviewPart}`)
+  }
+  if (prime) signalLines.push('Prime: Yes')
+  if (d?.delivery) signalLines.push(`Delivery: ${d.delivery}`)
+  if (d?.wasPrice != null && d?.savePercent != null) {
+    signalLines.push(`Was: ${formatCurrency(d.wasPrice, item?.currency ?? cart?.currency ?? null)} (save ${d.savePercent}%)`)
+  }
+  if (d?.asin) signalLines.push(`ASIN: ${d.asin}`)
+  if (d?.seller) signalLines.push(`Seller: ${d.seller}`)
+  const signalBlock = signalLines.length > 0
+    ? `\nPRODUCT SIGNALS\n${signalLines.join('\n')}\n`
+    : ''
+
   return `You are an impartial judge presiding over a purchase trial.
 
 SUBJECT OF THE TRIAL
 ${subject}
-
+${signalBlock}
 You have read the entire transcript. Pay particular attention to the BRAND, RATING, REVIEW COUNT, PRIME STATUS, DELIVERY, and any "Save X%" or "Was $X" signals. These materially change the weight of "is this a well-regarded product at a fair price" vs. "is this a low-quality or impulse-driven purchase". A $20 product with 4.8★ and 50k reviews is materially different from a $20 product with no brand or reviews.
 
 INSTRUCTIONS
@@ -215,9 +273,29 @@ If you are unsure, default to "abandon" with confidence 0.5 and a brief summary.
  *     write "Brand: unknown" because that misleads the model).
  */
 function describeSubject(product: Product, cart: Cart | null, detail: PromptDetail): string {
-  if (cart && cart.items.length > 0) {
+  // Single-item cart: treat it as a single product. The "A cart with 1
+  // item" framing was confusing models into thinking the product was a
+  // cart and hallucinating names like "All Carts". A 1-item cart IS
+  // a single product for the purposes of the trial.
+  if (cart && cart.items.length === 1) {
+    const item = cart.items[0]
+    const title = item.name || product.name
+    const price = item.price != null ? item.price : product.price
+    const currency = item.currency || cart.currency || product.currency
+    if (detail === 'minimal') {
+      return [
+        `PRODUCT: ${title}`,
+        `PRICE:  ${formatCurrency(price, currency)}`,
+        `SITE:   ${product.domain}`,
+      ].join('\n')
+    }
+    // Rich card for single-item cart — use the cart item's details.
+    return formatSingleItemCard(title, price, currency, product.domain, item.details, item.url)
+  }
+
+  if (cart && cart.items.length > 1) {
     const lines: string[] = [
-      `A cart with ${cart.itemCount} item${cart.itemCount === 1 ? '' : 's'} totaling ${formatCurrency(cart.total, cart.currency)} on ${product.domain}.`,
+      `A cart with ${cart.itemCount} items totaling ${formatCurrency(cart.total, cart.currency)} on ${product.domain}.`,
       '',
       'ITEMS:',
     ]
@@ -288,6 +366,45 @@ function formatItemCard(index: number, item: CartItem, cartCurrency: string | nu
   if (d?.asin) out.push(`  ASIN:       ${d.asin}`)
   if (item.url) out.push(`  Link:       ${item.url}`)
   return out
+}
+
+/**
+ * Rich product card for a single-item cart. The single-item-cart
+ * case in `describeSubject` flattens to a single product, so the rich
+ * card is the same shape as a non-cart product page — but uses the
+ * cart item's `details` block (which can be richer than the bare
+ * product page's details).
+ */
+function formatSingleItemCard(
+  title: string,
+  price: number | null,
+  currency: string | null,
+  domain: string,
+  details: CartItem['details'] | null | undefined,
+  url: string | null | undefined,
+): string {
+  const lines: string[] = [`PRODUCT: ${title}`]
+  if (details?.brand) lines.push(`Brand: ${details.brand}`)
+  if (details?.variation) lines.push(`Variation: ${details.variation}`)
+  if (details?.rating != null) {
+    const stars = '★'.repeat(Math.round(details.rating)) + '☆'.repeat(5 - Math.round(details.rating))
+    const reviewPart = details.reviewCount != null ? ` (${details.reviewCount.toLocaleString()} reviews)` : ''
+    lines.push(`Rating: ${details.rating} ${stars}${reviewPart}`)
+  }
+  lines.push(`Price: ${formatCurrency(price, currency)}`)
+  if (details?.prime) lines.push(`Prime: Yes`)
+  if (details?.delivery) lines.push(`Delivery: ${details.delivery}`)
+  if (details?.stock) lines.push(`Stock: ${details.stock}`)
+  if (details?.wasPrice != null && details?.savePercent != null) {
+    lines.push(`Was: ${formatCurrency(details.wasPrice, currency)} (save ${details.savePercent}%)`)
+  } else if (details?.savedText) {
+    lines.push(`Was: ${details.savedText}`)
+  }
+  if (details?.seller) lines.push(`Seller: ${details.seller}`)
+  lines.push(`Source: ${domain}`)
+  if (details?.asin) lines.push(`ASIN: ${details.asin}`)
+  if (url) lines.push(`Link: ${url}`)
+  return lines.join('\n')
 }
 
 

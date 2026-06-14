@@ -22,12 +22,12 @@ function formatCart(cart: Cart): string {
  */
 function initialFor(product: Product, cart: Cart | null): string {
   if (cart && cart.items.length > 0) {
-    const b = cart.items[0].details?.brand
-    if (b) return b.trim().charAt(0).toUpperCase() || '§'
+    const name = (cart.items[0].name || '').trim()
+    if (name) return name.charAt(0).toUpperCase() || '§'
     return '⊞'
   }
-  if (product.brand) {
-    const ch = product.brand.trim().charAt(0)
+  if (product.name) {
+    const ch = product.name.trim().charAt(0)
     return ch ? ch.toUpperCase() : '§'
   }
   return '§'
@@ -49,17 +49,32 @@ export function Header({
   onClose: () => void
 }) {
   const roundText = roundLabel(phase)
-  const isCart = !!(cart && cart.items.length > 0)
+  const cartItems = cart?.items ?? []
+  const isCart = cartItems.length > 1
+  const isSingleItemCart = cartItems.length === 1
 
-  const displayName = isCart
-    ? 'Cart'
+  // The display name:
+  //   - single-item cart: actual first item's name (the real product)
+  //   - multi-item cart:  "Cart" with a count, since no single name applies
+  //   - single product:   product.name
+  const displayName = isSingleItemCart
+    ? (cartItems[0].name || product.name || 'Item on trial')
+    : isCart
+    ? `Cart · ${cartItems.length} items`
     : ((product.name || '').trim() || 'Item on trial')
-  const priceText = isCart ? formatCart(cart!) : formatPrice(product)
+  const priceText = isCart || isSingleItemCart
+    ? formatCart(cart!)
+    : formatPrice(product)
   const subText = isCart
-    ? `${cart!.itemCount} item${cart!.itemCount === 1 ? '' : 's'} · ${product.domain || ''}`
+    ? `${product.domain || ''}`
+    : isSingleItemCart
+    ? `${product.domain || ''}`
     : `${product.domain || ''}`
-  const firstItem = isCart ? cart!.items[0] : null
-  const firstBrand = firstItem?.details?.brand ?? null
+  // Only show a brand line when we have a *real* brand, not a guess
+  // extracted from the first word of the title (which produced
+  // misleading lines like "LOUIS" for a Louis Vuitton book).
+  const firstBrand = isCart || isSingleItemCart ? cartItems[0]?.details?.brand ?? null : product.brand ?? null
+  const showBrand = !!firstBrand && firstBrand.length > 1
   const badgeInitial = initialFor(product, cart)
 
   return (
@@ -73,6 +88,7 @@ export function Header({
           <div className="whybuy-nameplate" style={{ fontSize: 11, marginBottom: 2 }}>
             {isCart ? 'Cart on Trial' : 'On Trial'}
           </div>
+
           <div
             style={{
               fontFamily: "'Cormorant Garamond', serif",
@@ -83,11 +99,11 @@ export function Header({
               textOverflow: 'ellipsis',
               fontWeight: 600,
             }}
-            title={isCart ? cart!.items.map((i) => i.name).join(', ') : displayName}
+            title={(isCart || isSingleItemCart) ? cart!.items.map((i) => i.name).join(', ') : displayName}
           >
             {displayName}
           </div>
-          {!isCart && product.brand && (
+          {showBrand && !isCart && (
             <div
               style={{
                 fontSize: 12,
@@ -97,10 +113,10 @@ export function Header({
                 marginTop: 1,
               }}
             >
-              {product.brand}
+              {firstBrand}
             </div>
           )}
-          {isCart && firstBrand && (
+          {showBrand && isCart && (
             <div
               style={{
                 fontSize: 12,
@@ -110,9 +126,7 @@ export function Header({
                 marginTop: 1,
               }}
             >
-              {cart!.items.length === 1
-                ? firstBrand
-                : `${firstBrand} + ${cart!.items.length - 1} other${cart!.items.length - 1 === 1 ? '' : 's'}`}
+              {`${firstBrand} + ${cart!.items.length - 1} other${cart!.items.length - 1 === 1 ? '' : 's'}`}
             </div>
           )}
           <div style={{ fontSize: 12, color: '#e6c578', marginTop: 2 }}>

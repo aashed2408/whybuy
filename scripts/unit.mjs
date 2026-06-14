@@ -321,12 +321,13 @@ test('judgeSystemPrompt includes brand/rating/reviewCount/prime from details', (
   // The structured product card must show the brand, the rating, and the
   // review count — these are the "diamond vs dirt" signals the user asked
   // for. The judge should not just see "Anker USB-C Hub — USD 35.99".
-  assert.match(prompt, /Brand:      Anker/)
-  assert.match(prompt, /Rating:     4\.7/)
+  assert.match(prompt, /Brand: Anker/)
+  assert.match(prompt, /Rating: 4\.7/)
   assert.match(prompt, /12,453 reviews/)
-  assert.match(prompt, /Prime:      Yes/)
-  assert.match(prompt, /Was:        USD 49\.99 \(save 28%\)/)
-  assert.match(prompt, /ASIN:       B07FZ8S74R/)
+  assert.match(prompt, /Prime: Yes/)
+  assert.match(prompt, /Was: USD 49\.99 \(save 28%\)/)
+  // ASIN lives on the cart item's details, not the product.
+  assert.match(prompt, /ASIN: B07FZ8S74R/)
   // The structured judge prompt also instructs the model to reason about these.
   assert.match(prompt, /BRAND, RATING, REVIEW COUNT/)
 })
@@ -362,8 +363,8 @@ test('prosecutionSystemPrompt shows the brand/rating in the subject', () => {
     isCheckout: false,
   }
   const prompt = prosecutionSystemPrompt(sampleProduct, richCart, { detail: 'rich' })
-  assert.match(prompt, /Brand:      NoName/)
-  assert.match(prompt, /Rating:     2\.1/)
+  assert.match(prompt, /Brand: NoName/)
+  assert.match(prompt, /Rating: 2\.1/)
   assert.match(prompt, /47 reviews/)
 })
 
@@ -465,21 +466,55 @@ test('counsel rebuttal user-prompt still requires the product title', () => {
   assert.match(out, /prosecution turn 2/i)
 })
 
-test('counsel cart user-prompt mentions cart, not product', () => {
+test('counsel cart user-prompt names the first item, not the page h1', () => {
   const out = buildCounselSubjectLine(sampleProduct, sampleCart)
-  assert.match(out, /CART: 3 items/)
+  // Multi-item cart: "<first item> + <N-1> other items totaling <total>"
+  assert.match(out, /CART: Headphones \+ 1 other item/)
   assert.match(out, /USD 169\.97/)
   assert.match(out, /example\.com/)
-  // Should NOT degrade to a single-product line.
-  assert.doesNotMatch(out, /PRODUCT: Premium Wireless Headphones/)
+  // Should NOT degrade to a single-product line that drops the rest.
+  assert.doesNotMatch(out, /^PRODUCT:/m)
 })
 
-test('counsel opening user-prompt on a cart does not collapse to a product line', () => {
+test('counsel opening user-prompt on a cart names the first item, not "this product"', () => {
   const out = buildCounselOpeningUserPrompt(sampleProduct, sampleCart)
-  assert.match(out, /CART: 3 items/)
-  // The opener still names the first item.
-  assert.match(out, /Headphones/)
-  assert.match(out, /NEVER/i)
+  // The pre-primed opener uses the first cart item, not the page
+  // h1 ("Shopping Cart" / "Cart" / product.name).
+  assert.match(out, /CART: Headphones \+ 1 other item/)
+  assert.match(out, /the purchase of Headphones at USD 169\.97 on example\.com/)
+  // First sentence must contain the first item's title.
+  assert.match(out, /FIRST sentence must contain the exact product title "Headphones"/i)
+  // The "never use the cart as a stand-in" rule.
+  assert.match(out, /"the cart"/i)
+})
+
+test('single-item cart is treated as a single product (PRODUCT: line, not CART: line)', () => {
+  const singleCart = {
+    items: [
+      { name: 'Louis Vuitton: The Complete Fashion Collections', price: 96.33, currency: 'USD', imageUrl: null, quantity: 1, url: null },
+    ],
+    total: 96.33,
+    currency: 'USD',
+    itemCount: 1,
+    source: 'amazon',
+    isCheckout: false,
+  }
+  // Page-level product.name is "Cart" (the page h1) — the cart line
+  // is what should appear.
+  const pageLevelProduct = { ...sampleProduct, name: 'Cart', price: null, currency: null }
+  const subject = buildCounselSubjectLine(pageLevelProduct, singleCart)
+  assert.match(subject, /PRODUCT: Louis Vuitton: The Complete Fashion Collections/)
+  assert.match(subject, /USD 96\.33/)
+  // Not the bogus "CART: 1 items" format from the old code.
+  assert.doesNotMatch(subject, /CART: /)
+
+  // And the opening user-prompt uses the cart item's name, not "Cart".
+  const opening = buildCounselOpeningUserPrompt(pageLevelProduct, singleCart)
+  assert.match(opening, /PRODUCT: Louis Vuitton: The Complete Fashion Collections/)
+  assert.match(opening, /the purchase of Louis Vuitton: The Complete Fashion Collections at USD 96\.33 on example\.com/)
+  assert.match(opening, /FIRST sentence must contain the exact product title "Louis Vuitton: The Complete Fashion Collections"/i)
+  // "the cart" is on the ban list.
+  assert.match(opening, /"the cart"/i)
 })
 
 // === Per-product-group cooldown fingerprinting ===
@@ -724,6 +759,69 @@ test('splitThinkBlocks preserves body content for downstream JSON parsing', () =
 //   - keep the NAMING CONVENTION section so the model refers to the
 //     product by brand+title
 
+// === Product name cleanup (lib/intercept/product.ts cleanName) ===
+//
+// These guard against the regression we saw in the screenshot: an
+// Amazon product page where the extracted title came back as
+// "Louis Vuitton: The Complete Fashion CollectionsLouis Vuitton: The
+// Complete Fashion Collections Opens in a new tab" — doubled text
+// from a11y duplication plus a screen-reader-only suffix.
+
+import { cleanName } from '../lib/intercept/product.ts'
+
+test('cleanName: leaves a clean title untouched', () => {
+  assert.equal(cleanName('Anker USB-C Hub, 7-in-1 Adapter with 4K HDMI'), 'Anker USB-C Hub, 7-in-1 Adapter with 4K HDMI')
+})
+
+test('cleanName: strips " Opens in a new tab" suffix', () => {
+  assert.equal(cleanName('Some Product Title Opens in a new tab'), 'Some Product Title')
+  assert.equal(cleanName('Some Product Title(opens in a new tab)'), 'Some Product Title')
+  assert.equal(cleanName('Some Product Title (Opens in a new tab)'), 'Some Product Title')
+})
+
+test('cleanName: strips "| Amazon.com" / " - Amazon.ca" site suffix', () => {
+  assert.equal(cleanName('Anker USB-C Hub | Amazon.com'), 'Anker USB-C Hub')
+  assert.equal(cleanName('Anker USB-C Hub - Amazon.ca'), 'Anker USB-C Hub')
+  assert.equal(cleanName('Anker USB-C Hub — Amazon.com'), 'Anker USB-C Hub')
+})
+
+test('cleanName: dedupes a title doubled end-to-end (exact half-half)', () => {
+  const t = 'Louis Vuitton: The Complete Fashion Collections'
+  assert.equal(cleanName(t + t), t)
+})
+
+test('cleanName: dedupes a title where the full text is two identical halves glued together', () => {
+  // "Foo Foo" — the first half is "Foo F" (5 chars) and the second is
+  // "oo" (2 chars), which doesn't match. The exact half-half test
+  // above is what catches the real-world Amazon doubling; this is
+  // just a sanity check that simple "Foo Foo" (no extra words) keeps
+  // the second occurrence, since it's not a clean doubled title.
+  assert.equal(cleanName('Foo Foo'), 'Foo Foo')
+})
+
+test('cleanName: combines all the cleanups', () => {
+  const doubled = 'Louis Vuitton: The Complete Fashion Collections'
+  assert.equal(
+    cleanName(`${doubled}${doubled} Opens in a new tab`),
+    'Louis Vuitton: The Complete Fashion Collections',
+  )
+})
+
+test('cleanName: returns empty string for empty/null input', () => {
+  assert.equal(cleanName(''), '')
+})
+
+test('cleanName: collapses internal whitespace', () => {
+  assert.equal(cleanName('Foo   bar  baz'), 'Foo bar baz')
+})
+
+test('cleanName: caps at 200 characters', () => {
+  const long = 'a'.repeat(500)
+  assert.equal(cleanName(long).length, 200)
+})
+
+// === Existing describeSubject tests follow ===
+
 test('describeSubject for product WITH brand includes Brand line and rating (rich mode)', () => {
   const productWithBrand = {
     name: 'Anker USB-C Hub, 7-in-1 Adapter with 4K HDMI',
@@ -821,6 +919,58 @@ test('describeSubject includes Prime line when product.prime is true (rich mode)
   }
   const prompt = prosecutionSystemPrompt(product, null, { detail: 'rich' })
   assert.match(prompt, /Prime: Yes/)
+})
+
+// === Single-item cart flattening ===
+//
+// The "A cart with 1 item" framing was confusing models into thinking
+// the product WAS a cart and hallucinating names like "All Carts".
+// A single-item cart is now flattened to a single-product subject
+// block so the model treats it as one thing to argue about.
+
+test('describeSubject: single-item cart uses PRODUCT: line, not "A cart with 1 item"', () => {
+  const singleCart = {
+    items: [
+      { name: 'Louis Vuitton: The Complete Fashion Collections', price: 96.33, currency: 'USD', imageUrl: null, quantity: 1, url: null, details: { brand: 'Louis Vuitton' } },
+    ],
+    total: 96.33,
+    currency: 'USD',
+    itemCount: 1,
+    source: 'amazon',
+    isCheckout: false,
+  }
+  const prompt = prosecutionSystemPrompt(sampleProduct, singleCart, { detail: 'minimal' })
+  // Subject must use the cart item's title, not "Cart" / sampleProduct.name.
+  assert.match(prompt, /PRODUCT: Louis Vuitton: The Complete Fashion Collections/)
+  assert.match(prompt, /PRICE:\s+USD 96\.33/)
+  // The "A cart with 1 item" framing must NOT appear.
+  assert.doesNotMatch(prompt, /A cart with 1 item/i)
+  // The role framing must reference the real product, not "Cart".
+  assert.match(prompt, /the purchase of Louis Vuitton: The Complete Fashion Collections/i)
+})
+
+test('describeSubject: single-item cart rich mode uses the cart item details, not product details', () => {
+  const singleCart = {
+    items: [
+      { name: 'Louis Vuitton: The Complete Fashion Collections', price: 96.33, currency: 'USD', imageUrl: null, quantity: 1, url: null, details: { brand: 'Louis Vuitton', rating: 4.6, reviewCount: 234 } },
+    ],
+    total: 96.33,
+    currency: 'USD',
+    itemCount: 1,
+    source: 'amazon',
+    isCheckout: false,
+  }
+  const prompt = prosecutionSystemPrompt(sampleProduct, singleCart, { detail: 'rich' })
+  assert.match(prompt, /PRODUCT: Louis Vuitton: The Complete Fashion Collections/)
+  assert.match(prompt, /Brand:\s+Louis Vuitton/)
+  assert.match(prompt, /Rating:\s+4\.6/)
+  assert.match(prompt, /234 reviews/)
+})
+
+test('describeSubject: multi-item cart still uses the "A cart with N items" framing', () => {
+  const prompt = prosecutionSystemPrompt(sampleProduct, sampleCart, { detail: 'minimal' })
+  assert.match(prompt, /A cart with 3 items/i)
+  assert.match(prompt, /ITEMS:/i)
 })
 
 // === isRowVisible: filter removed cart rows ===
@@ -1030,6 +1180,31 @@ REASONING: x
 SUMMARY: x
 FACTORS: a | b | c`)
   assert.equal(r2.decision, 'proceed')
+})
+
+test('parseNaturalVerdict: strips markdown code fences around the ruling', () => {
+  // The Prompt API and some Ollama Cloud models wrap the response in
+  // ``` blocks. The parser must still find the five lines.
+  const wrapped = '```\nDECISION: proceed\nCONFIDENCE: 0.7\nREASONING: x\nSUMMARY: y\nFACTORS: a | b | c\n```'
+  const parsed = parseNaturalVerdict(wrapped)
+  assert.equal(parsed.decision, 'proceed')
+  assert.equal(parsed.confidence, 0.7)
+  assert.equal(parsed.factors.length, 3)
+})
+
+test('parseNaturalVerdict: strips "Sure, here is the ruling:" preamble', () => {
+  const with_preamble = "Sure, here's the ruling:\n\nDECISION: abandon\nCONFIDENCE: 0.5\nREASONING: x\nSUMMARY: y\nFACTORS: a | b | c"
+  const parsed = parseNaturalVerdict(with_preamble)
+  assert.equal(parsed.decision, 'abandon')
+  assert.equal(parsed.confidence, 0.5)
+})
+
+test('parseNaturalVerdict: tolerates **DECISION**: markdown-bold labels', () => {
+  const bolded = '**DECISION**: proceed\n**CONFIDENCE**: 0.7\n**REASONING**: x\n**SUMMARY**: y\n**FACTORS**: a | b | c'
+  const parsed = parseNaturalVerdict(bolded)
+  assert.equal(parsed.decision, 'proceed')
+  assert.equal(parsed.confidence, 0.7)
+  assert.equal(parsed.factors.length, 3)
 })
 
 test('parseNaturalVerdict: factors line is split on |', () => {

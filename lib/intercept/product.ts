@@ -1,5 +1,5 @@
 import type { Product } from '../ai/types'
-import { shortHash } from '../utils/hash'
+import { shortHash } from '../utils/hash.ts'
 
 /**
  * Best-effort product metadata extraction.
@@ -285,8 +285,12 @@ function extractAmazon(): Omit<PartialProduct, 'url' | 'domain'> {
   // amazon.ca share the same template, but the `data-feature-name`
   // attribute has been seen on the latest redesign when `#productTitle`
   // is moved into a slot).
+  //
+  // We use `pickFirstVisibleText` (not raw textContent) so screen-
+  // reader-only spans like " Opens in a new tab" don't leak into the
+  // extracted title.
   const name =
-    pickFirstText([
+    pickFirstVisibleText([
       '#productTitle',
       'h1#title',
       'h1.a-size-large.product-title-word-break',
@@ -297,8 +301,8 @@ function extractAmazon(): Omit<PartialProduct, 'url' | 'domain'> {
       'h1#productTitle',
       'h1#titleSection',
     ]) ||
-    // Last-ditch: any h1 in the main content area.
-    document.querySelector('#centerCol h1, #mainContent h1, h1')?.textContent?.trim() ||
+    // Last-ditch: any h1 in the main content area, also visible-only.
+    pickFirstVisibleText(['#centerCol h1', '#mainContent h1', 'h1']) ||
     ''
   const priceWhole =
     document.querySelector('.a-price .a-offscreen')?.textContent?.trim() ||
@@ -353,6 +357,42 @@ function pickFirstText(selectors: string[]): string {
     if (t) return t
   }
   return ''
+}
+
+/**
+ * Try each CSS selector in turn and return the first non-empty
+ * `textContent` with screen-reader-only spans removed. Amazon's
+ * redesigned product page renders `#productTitle` as a link that
+ * contains both the visible title text and a hidden span with
+ * " Opens in a new tab" for screen readers — `textContent` reads
+ * both, which is what was causing the "Foo Foo Opens in a new tab"
+ * duplication. We clone the node, strip sr-only descendants, and
+ * read `textContent` of the clone.
+ */
+function pickFirstVisibleText(selectors: string[]): string {
+  for (const sel of selectors) {
+    const el = document.querySelector(sel)
+    if (!el) continue
+    const t = visibleTextOf(el)
+    if (t) return t
+  }
+  return ''
+}
+
+/**
+ * Return the visible (non-screen-reader-only) text of an element.
+ * Clones the node, removes all visually-hidden / sr-only descendants,
+ * and reads the clone's `textContent`. The original DOM is untouched.
+ */
+function visibleTextOf(el: Element): string {
+  const clone = el.cloneNode(true) as Element
+  const hidden = clone.querySelectorAll(
+    '[aria-hidden="true"], .a-offscreen, .aok-hidden, ' +
+      '.visually-hidden, .sr-only, .screen-reader-only, ' +
+      '[style*="display: none" i], [style*="visibility: hidden" i]',
+  )
+  hidden.forEach((n) => n.remove())
+  return (clone.textContent || '').replace(/\s+/g, ' ').trim()
 }
 
 /**
@@ -519,12 +559,33 @@ function guessNameFromDom(): string {
   return cleanName(document.title || location.hostname)
 }
 
-function cleanName(name: string): string {
-  return name
-    .replace(/\s+[\|—-]\s+.*$/, '') // strip trailing site suffix like "| Amazon.com"
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 200)
+export function cleanName(name: string): string {
+  if (!name) return ''
+  let s = name
+  // Strip trailing site suffix like "| Amazon.com" / " - Amazon.ca"
+  s = s.replace(/\s+[\|—–-]\s+(?:amazon\.[a-z.]+|www\.[^\s]+)\s*$/i, '')
+  // Strip trailing " - Amazon.com" without a leading separator (rare, but
+  // Amazon's mobile layout sometimes renders " - Amazon.com" directly)
+  s = s.replace(/\s+-\s+Amazon\.[a-z.]+\s*$/i, '')
+  // Strip trailing " Opens in a new tab" / "(opens in a new tab)" — this
+  // is Amazon's screen-reader-only text that leaks into `textContent`
+  // when the title link is rendered with both visible and a11y text.
+  s = s.replace(/\s*[(\s]?opens?\s+in\s+a\s+new\s+tab[)\s]?\s*$/i, '')
+  // Collapse runs of whitespace
+  s = s.replace(/\s+/g, ' ').trim()
+  // Dedupe a doubled title where the exact same string appears twice
+  // in a row (Amazon's redesigned product page renders the title in
+  // both the visible <a> and an aria-describedby reference, so
+  // textContent reads "Foo Foo").
+  if (s.length > 8) {
+    const half = s.slice(0, Math.floor(s.length / 2))
+    const other = s.slice(Math.floor(s.length / 2))
+    if (half === other) s = half
+    // Also dedupe when the second half *starts with* the first half
+    // followed by extra (e.g. "FooFoo bar" — not half-and-half).
+    if (other.startsWith(half)) s = half
+  }
+  return s.slice(0, 200)
 }
 
 function str(v: any): string | null {

@@ -68,11 +68,18 @@ export function parseNaturalVerdict(raw: string): NaturalParseResult {
     return empty()
   }
 
-  const decisionRaw = matchGroup(raw, RE_DECISION)
-  const confidenceRaw = matchGroup(raw, RE_CONFIDENCE)
-  const reasoningRaw = matchGroup(raw, RE_REASONING)
-  const summaryRaw = matchGroup(raw, RE_SUMMARY)
-  const factorsRaw = matchGroup(raw, RE_FACTORS)
+  // Sanitize: strip markdown code fences (Prompt API + Ollama Cloud
+  // models both sometimes wrap the response in ```...```), strip
+  // common preambles like "Sure, here is the ruling:", and strip
+  // markdown emphasis (**, _) around the label so "**DECISION**:"
+  // still matches the line regex.
+  const sanitized = sanitizeNaturalOutput(raw)
+
+  const decisionRaw = matchGroup(sanitized, RE_DECISION)
+  const confidenceRaw = matchGroup(sanitized, RE_CONFIDENCE)
+  const reasoningRaw = matchGroup(sanitized, RE_REASONING)
+  const summaryRaw = matchGroup(sanitized, RE_SUMMARY)
+  const factorsRaw = matchGroup(sanitized, RE_FACTORS)
 
   const decision = normalizeDecision(decisionRaw)
   const confidence = confidenceRaw != null ? clampConfidence(confidenceRaw) : null
@@ -87,6 +94,27 @@ export function parseNaturalVerdict(raw: string): NaturalParseResult {
   const partial = !(decision && confidence != null && summary.length > 0 && factors.length === 3)
 
   return { decision, confidence, reasoning, summary, factors, partial }
+}
+
+/**
+ * Strip markdown code fences, common preambles, and inline
+ * emphasis around the label markers so the line regexes match.
+ */
+function sanitizeNaturalOutput(raw: string): string {
+  let s = raw
+  // Strip opening code fence (``` or ```text) on its own line
+  s = s.replace(/^[ \t]*```(?:[a-zA-Z0-9_-]*)?[ \t]*\r?\n/gm, '')
+  // Strip closing code fence on its own line
+  s = s.replace(/\r?\n[ \t]*```[ \t]*$/gm, '')
+  // Strip common preambles on the first ~3 lines
+  s = s.replace(
+    /^(?:sure[,.!]?\s+here(?:\s+is)?\s+(?:the\s+)?(?:my\s+)?(?:final\s+)?ruling[:.]?\s*|here(?:'s|\s+is)\s+(?:the\s+)?(?:my\s+)?(?:final\s+)?ruling[:.]?\s*|ruling[:.]?\s*|final\s+ruling[:.]?\s*|my\s+ruling[:.]?\s*|verdict[:.]?\s*|the\s+ruling\s+is\s+as\s+follows[:.]?\s*)+/i,
+    '',
+  )
+  // Strip markdown emphasis around label tokens on each line.
+  // We only target known label names so we don't mangle real text.
+  s = s.replace(/^[ \t]*[*_]{1,3}(DECISION|CONFIDENCE|REASONING|SUMMARY|FACTORS)[*_]{1,3}[ \t]*:/gim, '$1:')
+  return s
 }
 
 function matchGroup(raw: string, re: RegExp): string | null {

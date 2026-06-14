@@ -163,11 +163,23 @@ async function openTrial(args: {
  * Determine the subject of the trial. On cart pages, extract the cart
  * (multiple items, total) and attach it to the product. Elsewhere, just
  * extract the product.
+ *
+ * On a single-item cart we also override the product's `name` with the
+ * cart item's name, because `extractProduct()` on a cart page falls
+ * back to the page's h1 ("Shopping Cart", "Cart", etc.) which is not
+ * a real product. The cart item is the real product; using its name
+ * keeps the trial grounded in what the user is actually buying.
  */
 function extractSubject(): { product: Product; cart: Cart | null } {
   const cart = extractCart()
   const product = extractProduct()
   if (cart && cart.items.length > 0) {
+    if (cart.items.length === 1 && cart.items[0].name) {
+      product.name = cart.items[0].name
+      if (cart.items[0].price != null) product.price = cart.items[0].price
+      if (cart.items[0].currency) product.currency = cart.items[0].currency
+      if (cart.items[0].details?.brand) product.brand = cart.items[0].details.brand
+    }
     product.cart = cart
   }
   return { product, cart: product.cart ?? null }
