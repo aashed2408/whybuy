@@ -520,7 +520,10 @@ function extractShopify(): Omit<PartialProduct, 'url' | 'domain'> {
   }
 }
 
-function parsePriceString(raw: string): { price: number | null; currency: string | null } {
+export function parsePriceString(
+  raw: string,
+  domain?: string,
+): { price: number | null; currency: string | null } {
   if (!raw) return { price: null, currency: null }
   const cleaned = raw.replace(/\s+/g, ' ').trim()
   // Currency detection: leading symbol or 3-letter code.
@@ -533,6 +536,17 @@ function parsePriceString(raw: string): { price: number | null; currency: string
   } else {
     const codeMatch = cleaned.match(/\b(USD|EUR|GBP|JPY|CAD|AUD|CHF|SEK|NOK|DKK|INR|BRL|MXN)\b/i)
     if (codeMatch) currency = codeMatch[1].toUpperCase()
+  }
+  // On .ca domains, the page is Canadian — default to CAD even if
+  // the price text shows a bare "$" or literally "USD". Amazon.ca
+  // and other Canadian stores list all prices in CAD regardless of
+  // which symbol or code is rendered. Domain is passed in by the
+  // caller; we fall back to location.hostname so the existing call
+  // sites don't need to be touched.
+  const effectiveDomain =
+    domain ?? (typeof location !== 'undefined' ? location.hostname : '')
+  if (currency === 'USD' && /\.ca$/i.test(effectiveDomain)) {
+    currency = 'CAD'
   }
   // Price: digits with optional thousand separators and decimal.
   const numMatch = cleaned.match(/(\d{1,3}(?:[,\s]\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?)/)

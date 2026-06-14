@@ -4065,3 +4065,91 @@ test('defaultSttConfig returns enabled=false, scribe_v2', async () => {
   assert.equal(c.enabled, false)
   assert.equal(c.modelId, 'scribe_v2')
 })
+
+// ============================================================================
+// Currency parsing: domain-aware .ca override
+// ============================================================================
+//
+// Amazon.ca often shows prices as just "$129.99" (bare dollar, no "C"
+// prefix). The default symbol-to-currency map treats bare "$" as USD,
+// which is wrong for Amazon.ca. The override converts USD → CAD when
+// the domain ends with `.ca` (covers amazon.ca, bestbuy.ca, etc.).
+
+test('parsePriceString: bare $ on .ca domain is CAD, not USD (Amazon.ca case)', async () => {
+  const { parsePriceString } = await import('../lib/intercept/product.ts')
+  const out = parsePriceString('$129.99', 'www.amazon.ca')
+  assert.equal(out.currency, 'CAD', 'bare $ on amazon.ca is CAD')
+  assert.equal(out.price, 129.99)
+})
+
+test('parsePriceString: explicit "USD" on .ca domain is overridden to CAD', async () => {
+  const { parsePriceString } = await import('../lib/intercept/product.ts')
+  const out = parsePriceString('USD 5.99', 'amazon.ca')
+  assert.equal(out.currency, 'CAD', 'USD on amazon.ca is overridden to CAD')
+  assert.equal(out.price, 5.99)
+})
+
+test('parsePriceString: explicit "C$" on .ca domain stays CAD', async () => {
+  const { parsePriceString } = await import('../lib/intercept/product.ts')
+  const out = parsePriceString('C$129.99', 'amazon.ca')
+  assert.equal(out.currency, 'CAD')
+  assert.equal(out.price, 129.99)
+})
+
+test('parsePriceString: explicit "CAD" code on .ca domain stays CAD', async () => {
+  const { parsePriceString } = await import('../lib/intercept/product.ts')
+  const out = parsePriceString('CAD 129.99', 'amazon.ca')
+  assert.equal(out.currency, 'CAD')
+  assert.equal(out.price, 129.99)
+})
+
+test('parsePriceString: bare $ on .com domain stays USD (Amazon.com case)', async () => {
+  const { parsePriceString } = await import('../lib/intercept/product.ts')
+  const out = parsePriceString('$129.99', 'www.amazon.com')
+  assert.equal(out.currency, 'USD', 'bare $ on amazon.com is USD (unchanged)')
+  assert.equal(out.price, 129.99)
+})
+
+test('parsePriceString: no domain passed (no location global) keeps bare $ as USD', async () => {
+  // In Node the `location` global is undefined, so when no domain is
+  // passed the function falls back to '' and the override does NOT fire.
+  // This is the default behavior for unit tests and for any caller
+  // that doesn't have a domain in scope.
+  const { parsePriceString } = await import('../lib/intercept/product.ts')
+  const out = parsePriceString('$129.99')
+  assert.equal(out.currency, 'USD', 'no domain = no override')
+})
+
+test('parsePriceString: .ca override fires for subdomains too (www.amazon.ca)', async () => {
+  const { parsePriceString } = await import('../lib/intercept/product.ts')
+  const out = parsePriceString('$129.99', 'www.amazon.ca')
+  assert.equal(out.currency, 'CAD')
+})
+
+test('parsePriceString: .ca override does NOT fire for similar-looking TLDs (.com.au, .co.ca)', async () => {
+  // The regex is `/\.ca$/i` — strict match on the TLD, not the
+  // presence of "ca" anywhere. .com.au is Australian, .co.ca would
+  // be a Colombian domain, not a Canadian one (Canada uses .ca).
+  // Note: a domain literally ending in `.co.ca` is unusual, but
+  // being strict here is the safe call.
+  const { parsePriceString } = await import('../lib/intercept/product.ts')
+  const out = parsePriceString('$129.99', 'example.com.au')
+  assert.equal(out.currency, 'USD', '.com.au is not .ca')
+})
+
+test('parsePriceString: other currencies (EUR, GBP, JPY) are NOT overridden on .ca', async () => {
+  // The override ONLY catches USD → CAD. Other currencies pass
+  // through unchanged. (A €-priced item on amazon.ca would still
+  // be shown as € — the override is conservative.)
+  const { parsePriceString } = await import('../lib/intercept/product.ts')
+  assert.equal(parsePriceString('€50.00', 'amazon.ca').currency, 'EUR')
+  assert.equal(parsePriceString('£40.00', 'amazon.ca').currency, 'GBP')
+  assert.equal(parsePriceString('¥1000', 'amazon.ca').currency, 'JPY')
+})
+
+test('parsePriceString: cart version behaves identically (same .ca override)', async () => {
+  const { parsePriceString } = await import('../lib/intercept/cart.ts')
+  const out = parsePriceString('$24.99', 'amazon.ca')
+  assert.equal(out.currency, 'CAD', 'cart parser also overrides on .ca')
+  assert.equal(out.price, 24.99)
+})
