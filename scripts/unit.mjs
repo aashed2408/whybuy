@@ -386,6 +386,47 @@ test('prosecution prompt enforces title naming convention in minimal mode', () =
   assert.match(prompt, /first two words/i)
 })
 
+test('prosecution prompt embeds the product title in the role framing', () => {
+  // The product title is "Premium Wireless Headphones" — the prompt
+  // should weave it into the role block so the model treats it as
+  // identity-level, not optional background.
+  const prompt = prosecutionSystemPrompt(sampleProduct, null, { detail: 'minimal' })
+  assert.match(prompt, /THE PRODUCT ON TRIAL/i)
+  assert.match(prompt, /Premium Wireless Headphones/)
+  assert.match(prompt, /USD 129\.99/)
+  assert.match(prompt, /example\.com/)
+  // The model is told it is arguing against THIS product, not a
+  // generic purchase.
+  assert.match(prompt, /NOT arguing against a generic purchase/i)
+  assert.match(prompt, /You are arguing against Premium Wireless Headphones/i)
+})
+
+test('prosecution prompt requires product title in the first sentence of the opening statement', () => {
+  // The opening-statement rule must include the actual product title
+  // in a template the model can follow.
+  const prompt = prosecutionSystemPrompt(sampleProduct, null, { detail: 'minimal' })
+  assert.match(prompt, /OPENING STATEMENT/i)
+  // The literal title must appear inside the opening-statement template.
+  assert.match(prompt, /"Ladies and gentlemen of the jury, the matter before the court is the purchase of Premium Wireless Headphones at USD 129\.99 on example\.com/)
+  // The rule that the FIRST sentence must contain the title.
+  assert.match(prompt, /first sentence of your opening statement must contain "Premium Wireless Headphones"/i)
+})
+
+test('prosecution prompt warns the model to replace generic stand-ins with the title', () => {
+  // The model is told to substitute "this product" with the actual
+  // title rather than emitting the generic phrase.
+  const prompt = prosecutionSystemPrompt(sampleProduct, null, { detail: 'minimal' })
+  assert.match(prompt, /If you are about to say "this product"/i)
+  assert.match(prompt, /replace it with "Premium Wireless Headphones"/i)
+})
+
+test('natural judge prompt requires the product in SUMMARY', () => {
+  const prompt = judgeSystemPrompt(sampleProduct, null, { judgeMode: 'natural' })
+  // SUMMARY rule must demand the product name, not just REASONING.
+  assert.match(prompt, /SUMMARY:[\s\S]*?name the specific product/i)
+  assert.match(prompt, /never a generic phrase/i)
+})
+
 test('judge prompt enforces title naming in structured mode summary and factors', () => {
   const prompt = judgeSystemPrompt(sampleProduct, sampleCart, { judgeMode: 'structured' })
   // Judge is told to name items in the summary and topFactors.
