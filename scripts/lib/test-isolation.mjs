@@ -20,7 +20,7 @@ const REAL_PROFILE_ENV = 'WHYBUY_ALLOW_REAL_PROFILE'
  * True when `userDataDir` lives under `os.tmpdir()`. Returns false
  * for empty / null input.
  */
-export function isTempProfile(userDataDir: string | null | undefined): boolean {
+export function isTempProfile(userDataDir) {
   if (!userDataDir) return false
   const abs = resolve(userDataDir)
   const tmp = resolve(tmpdir())
@@ -35,7 +35,7 @@ export function isTempProfile(userDataDir: string | null | undefined): boolean {
  * The exit code is 2 so it can be distinguished from a test failure
  * (1) in CI.
  */
-export function assertIsolatedProfile(userDataDir: string | null | undefined): void {
+export function assertIsolatedProfile(userDataDir) {
   if (isTempProfile(userDataDir)) return
   if (process.env[REAL_PROFILE_ENV] === '1') {
     console.warn(`⚠ WHYBUY_ALLOW_REAL_PROFILE=1 set: using non-temp profile ${userDataDir}`)
@@ -44,10 +44,10 @@ export function assertIsolatedProfile(userDataDir: string | null | undefined): v
   console.error('✘ Refusing to use a non-temp Chrome profile for tests.')
   console.error(`  userDataDir: ${userDataDir}`)
   console.error('  Tests must run in an isolated tempdir so they never')
-  console.error('  touch the user\'s real Chrome storage state.')
+  console.error("  touch the user's real Chrome storage state.")
   console.error('')
   console.error('  Fix:')
-  console.error('    - Use `mkdtempSync(join(tmpdir(), \'whybuy-...\'))` for userDataDir.')
+  console.error("    - Use `mkdtempSync(join(tmpdir(), 'whybuy-...'))` for userDataDir.")
   console.error(`    - Or set ${REAL_PROFILE_ENV}=1 to override.`)
   process.exit(2)
 }
@@ -56,6 +56,6 @@ export function assertIsolatedProfile(userDataDir: string | null | undefined): v
  * Standard test-isolation log line. Helps audit the test scripts by
  * making the profile they use visible in the test output.
  */
-export function logIsolatedProfile(label: string, userDataDir: string): void {
+export function logIsolatedProfile(label, userDataDir) {
   console.log(`[${label}] isolated profile: ${userDataDir}`)
 }

@@ -222,13 +222,13 @@ try {
  * capped at depth 3 and skips any node_modules-looking dir to keep
  * it fast.
  */
-async function findWhybuyFilesOutsideProfile(root: string, allowed: string, ...alsoAllowed: string[]): Promise<string[]> {
-  const allowedAbs = [resolve(allowed), ...alsoAllowed.map(resolve)]
-  const out: string[] = []
+async function findWhybuyFilesOutsideProfile(root, allowed, ...alsoAllowed) {
+  const allowedAbs = [resolve(allowed), ...alsoAllowed.map((p) => resolve(p))]
+  const out = []
   const skip = new Set(['node_modules', '.git', '.cache'])
-  function walk(dir: string, depth: number) {
+  function walk(dir, depth) {
     if (depth > 3) return
-    let entries: string[]
+    let entries
     try { entries = readdirSync(dir) } catch { return }
     for (const name of entries) {
       if (skip.has(name)) continue
