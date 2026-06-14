@@ -62,12 +62,28 @@ export default defineBackground(() => {
     })
   })
 
-  chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg && msg.type === 'WHYBUY_GET_PROVIDER_STATUS') {
       handleStatus()
         .then((status) => sendResponse(status))
         .catch((err) => sendResponse({ kind: 'unsupported', reason: String(err) }))
       return true
+    }
+    // Close the tab that sent this message. Used by the verdict
+    // screen's "I accept the ruling" button after its 3-second
+    // countdown completes. The content script doesn't have the
+    // chrome.tabs permission, so it asks the background to do it.
+    if (msg && msg.type === 'WHYBUY_CLOSE_TAB') {
+      const tabId = sender.tab?.id
+      if (tabId != null) {
+        chrome.tabs.remove(tabId).catch((err) => {
+          warn('WHYBUY_CLOSE_TAB: tabs.remove failed:', err)
+        })
+        sendResponse({ ok: true })
+      } else {
+        sendResponse({ ok: false, reason: 'no-tab-id' })
+      }
+      return false
     }
     return false
   })

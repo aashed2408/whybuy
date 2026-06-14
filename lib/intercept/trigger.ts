@@ -31,6 +31,18 @@ export interface InterceptorOptions {
    * falsy, normal interception proceeds.
    */
   consumeSuppress?: () => boolean
+  /**
+   * Synchronous check: if the current site is in the user's bypass
+   * set (set when the user clicked "I disagree — proceed anyway"),
+   * return true and let the click through without preventDefault.
+   * The check runs BEFORE target matching and BEFORE preventDefault,
+   * so the user can navigate to /checkout by clicking the real
+   * "Continue to checkout" button on the cart. Unlike `consumeSuppress`
+   * this is sticky for the rest of the browser session on the
+   * bypassed site — every checkout click after an override passes
+   * through, not just the next one.
+   */
+  consumeBypass?: () => boolean
 }
 
 /**
@@ -57,6 +69,17 @@ export function installClickInterceptor(
     // preventDefault. This is what makes override / proceed
     // actually navigate to the checkout page.
     if (options.consumeSuppress?.()) {
+      return
+    }
+
+    // EARLY-OUT for the per-site bypass. When the user clicks
+    // "I disagree — proceed anyway", we add the current site to
+    // the session-scoped bypass set. From then on, every checkout
+    // click on this site (this browser session) is allowed to
+    // pass through naturally to /checkout. The check is also
+    // BEFORE target matching and BEFORE preventDefault.
+    if (options.consumeBypass?.()) {
+      log('Bypass active — letting checkout click through')
       return
     }
 

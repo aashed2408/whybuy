@@ -408,6 +408,27 @@ export function TrialApp(props: TrialProps) {
     props.onAbandon?.(state.verdict)
   }
 
+  /**
+   * Close the tab after a restraint verdict + "Accept the ruling"
+   * countdown. Records the outcome (sets the cooldown + appends to
+   * history) FIRST, then asks the background to close this tab via
+   * `chrome.runtime.sendMessage`. The background calls
+   * `chrome.tabs.remove(senderTab.id)` because content scripts
+   * don't have the tabs permission themselves.
+   */
+  const handleCloseTab = () => {
+    if (!state.verdict) return
+    props.tts?.interrupt()
+    dispatch({ type: 'USER_ACCEPTS_LOSS' })
+    props.onTranscript?.(state.transcript, state.verdict, 'accepted-abandon')
+    props.onAbandon?.(state.verdict)
+    try {
+      chrome.runtime.sendMessage({ type: 'WHYBUY_CLOSE_TAB' })
+    } catch (e) {
+      console.warn('[WhyBuy] failed to send WHYBUY_CLOSE_TAB:', e)
+    }
+  }
+
   const handleOverride = () => {
     if (!state.verdict) return
     props.tts?.interrupt()
@@ -457,6 +478,7 @@ export function TrialApp(props: TrialProps) {
         onProceed={handleProceed}
         onAcceptLoss={handleAcceptLoss}
         onOverride={handleOverride}
+        onCloseTab={handleCloseTab}
       />
     )
   }

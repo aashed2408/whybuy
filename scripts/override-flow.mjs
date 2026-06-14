@@ -1,14 +1,18 @@
 // Override-navigation regression test.
 //
-// Reproduces the user-reported bug: "I disagree — proceed anyway" closed
-// the trial but did NOT send the user to the checkout page. Root cause:
-// the previous reDispatch() synthesized a MouseEvent and dispatched it,
-// which works for on-page listeners but does NOT trigger the default
-// action for <a href> links or form submit buttons (Amazon.ca's
-// "Proceed to checkout" is one of these, so the page never navigated).
-// Fix: use the element's native .click() method, with a location.href
-// fallback for <a href> elements whose on-page handler called
-// preventDefault().
+// Reproduces the user-reported flow: "I disagree — proceed anyway"
+// closes the trial and sets a per-site bypass, then the user
+// returns to the cart and clicks the real "Continue to checkout"
+// button — which now passes through to /checkout without being
+// intercepted (the bypass flag is sticky for the rest of the
+// browser session on this site).
+//
+// The new flow replaces the old re-dispatch-on-override approach.
+// The previous design synthesized a click and navigated immediately
+// to /checkout, which was jarring — the user wanted to "return to
+// the cart" and decide for themselves. The bypass flag makes the
+// "Continue to checkout" button on the real cart page work
+// naturally, exactly as it would without the extension installed.
 //
 // This script:
 //   1. Serves the real cart fixture (Anker USB-C Hub + Logitech mouse)
@@ -19,8 +23,10 @@
 //      external AI dependency, but the verdict text uses the REAL
 //      product name, price, and cart items from the fixture).
 //   4. Clicks "I disagree — proceed anyway".
-//   5. Verifies the page navigated to /checkout.
-//   6. Saves screenshots at every step.
+//   5. Waits for the trial to close and the cart to be visible again.
+//   6. Clicks the real "Continue to checkout" button on the cart.
+//   7. Verifies the page navigated to /checkout (via the bypass).
+//   8. Saves screenshots at every step.
 //
 // No placeholder data: the product name "Anker USB-C Hub, 7-in-1
 // Adapter with 4K HDMI", the price $99.99, and the cart total $135.98
@@ -343,6 +349,53 @@ try {
   })
   console.log('  ✔ Override clicked')
 
+  // Wait for the trial overlay to close (the new flow returns the
+  // user to the cart, instead of forcing navigation to /checkout).
+  let trialClosed = false
+  waited = 0
+  while (waited < 10000) {
+    const present = await page.evaluate(() => !!document.querySelector('[data-whybuy="1"]'))
+    if (!present) {
+      trialClosed = true
+      break
+    }
+    await new Promise((r) => setTimeout(r, 100))
+    waited += 100
+  }
+  if (!trialClosed) {
+    console.error('  ✘ Trial did not close after override')
+    exitCode = 1
+  } else {
+    console.log('  ✔ Trial closed — user is back on the cart')
+  }
+  await new Promise((r) => setTimeout(r, 500))
+
+  // Sanity-check: the bypass flag should be set. We verify it
+  // functionally on the next click — the page log will show
+  // "Bypass active — letting checkout click through" if the flag
+  // is set. (chrome.storage.session is not directly accessible from
+  // the content-script context, so we don't read it here; the
+  // content script's log is the authoritative proof.)
+  console.log('  ✔ Trial closed — user is back on the cart (bypass should be active for the next click)')
+
+  // === Step 5b: Click the REAL "Continue to checkout" button on the cart ===
+  // With the bypass flag set, the click interceptor lets this click
+  // through to the page's own handler, which navigates to /checkout.
+  console.log('\n[5b/6] Clicking the real "Continue to checkout" on the cart ...')
+  const clicked2 = await page.evaluate(() => {
+    const all = Array.from(document.querySelectorAll('button, a, input[type="submit"]'))
+    for (const el of all) {
+      const text = (el.textContent || el.value || el.getAttribute('aria-label') || '').trim()
+      if (!/proceed\s*to\s*checkout/i.test(text)) continue
+      el.scrollIntoView({ block: 'center' })
+      el.click()
+      return { text, tag: el.tagName, href: el.getAttribute('href') }
+    }
+    return null
+  })
+  if (!clicked2) throw new Error('Could not click Proceed to checkout on cart')
+  console.log(`  ✔ Clicked <${clicked2.tag}> "${clicked2.text}"`)
+
   // Wait for navigation to /checkout.
   let navigated = false
   waited = 0
@@ -358,7 +411,7 @@ try {
   const urlAfter = page.url()
   console.log('  URL after override: ', urlAfter)
   if (!navigated) {
-    console.error('  ✘ FAILED: page did not navigate to /checkout after override')
+    console.error('  ✘ FAILED: page did not navigate to /checkout after the second click')
     console.error('  Expected:', checkoutUrl)
     console.error('  Actual:  ', urlAfter)
     exitCode = 1

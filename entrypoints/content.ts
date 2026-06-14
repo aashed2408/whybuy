@@ -6,6 +6,7 @@ import type { Cart, Product, Verdict } from '@/lib/ai/types'
 import { appendHistory } from '@/lib/storage/history'
 import { setCooldown, getCooldown, getCooldownFingerprint } from '@/lib/storage/cooldowns'
 import { loadSettings } from '@/lib/storage/settings'
+import { isBypassedSync, loadBypass, setBypass } from '@/lib/storage/bypass'
 import { log, warn } from '@/lib/utils/log'
 import { mountTrial, type TrialController } from '@/components/trial/mount'
 import { defineContentScript } from 'wxt/utils/define-content-script'
@@ -21,6 +22,10 @@ export default defineContentScript({
 
       await waitForBody()
 
+      // Load the per-site bypass set so the click interceptor can
+      // ask "is this site bypassed right now?" synchronously.
+      await loadBypass()
+
       // Set up the click interceptor. Trial fires only when the user
       // explicitly clicks a "Checkout" / "Proceed to checkout" button.
       // No URL auto-trigger.
@@ -30,6 +35,13 @@ export default defineContentScript({
       // `onProceed` or `onOverride` actually navigates to the
       // checkout page (the previous design checked the counter
       // AFTER preventDefault, which always blocked the re-dispatch).
+      //
+      // `consumeBypass` is also BEFORE target matching + BEFORE
+      // preventDefault. After the user clicks "I disagree — proceed
+      // anyway" on a restraint verdict, the current site is added
+      // to a session-scoped bypass set. From then on, every
+      // checkout click on this site passes through to /checkout
+      // without re-triggering the trial.
       const removeInterceptor = installClickInterceptor(
         (result) => {
           const { product, cart } = extractSubject()
@@ -49,6 +61,7 @@ export default defineContentScript({
             }
             return false
           },
+          consumeBypass: () => isBypassedSync(location.hostname),
         },
       )
 
@@ -159,19 +172,24 @@ async function openTrial(args: {
       if (epoch !== trialEpoch) return
       // Recording is handled by the `onTranscript` callback. This
       // callback owns the side effects the `onTranscript` path
-      // can't: closing the trial and re-dispatching the original
-      // "Proceed to checkout" click so the user actually navigates
-      // to the checkout page. The previous behavior was to dump the
-      // user back on the cart page with no navigation, which then
-      // re-triggered the trial on the next click (infinite loop).
+      // can't: closing the trial overlay and setting the per-site
+      // bypass so the next "Continue to checkout" click passes
+      // through to /checkout naturally (without re-triggering the
+      // trial). The user is returned to the cart page; they click
+      // the real "Continue to checkout" button themselves.
+      //
+      // We do NOT re-dispatch the original click here — the
+      // previous design did, but it forced the user to land on
+      // /checkout immediately, which is jarring. The user wanted
+      // to "return to the cart and press continue to checkout",
+      // so we leave them on the cart and let the bypass handle
+      // the next click.
+      void setBypass(location.hostname).then(() => {
+        log('Override: bypass set for', location.hostname)
+      })
       const c = activeController
       activeController = null
       c?.close()
-      if (source === 'click' && event) {
-        reDispatch(event, product)
-      } else {
-        log('Override from URL-triggered trial for', product.name)
-      }
     },
     onClose: () => {
       if (epoch !== trialEpoch) return

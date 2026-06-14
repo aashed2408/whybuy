@@ -4,6 +4,14 @@ import { CartSummary } from './CartSummary'
 import { ProductCardStack } from './ProductCard'
 
 /**
+ * How long the "Accept the ruling" countdown waits before actually
+ * closing the tab. Three seconds gives the user enough time to read
+ * the warning and click "Cancel" if they clicked by accident, but
+ * is short enough that the close feels immediate once they commit.
+ */
+const CLOSE_COUNTDOWN_SECONDS = 3
+
+/**
  * Full-screen verdict reveal. Three internal phases:
  *   1. `deliberating` — "Court is in session" + judge mark + product stack.
  *   2. `strike`     — 900 ms gavel-strike animation.
@@ -12,6 +20,14 @@ import { ProductCardStack } from './ProductCard'
  * The deliberation phase is shown while `verdict == null` (we sent the
  * JUDGE request, waiting for the JSON). Once the verdict arrives, the
  * gavel strikes and the verdict reveals.
+ *
+ * On a restraint verdict, the "Accept the ruling" button starts a
+ * 3-second countdown that closes the tab when it reaches zero. The
+ * countdown has a "Cancel" button that returns the user to the
+ * verdict card without closing anything. "I disagree — proceed
+ * anyway" sets a per-site bypass flag and returns the user to the
+ * cart so they can navigate to /checkout themselves without
+ * re-triggering the trial.
  */
 export function JudgeRoom({
   product,
@@ -20,6 +36,7 @@ export function JudgeRoom({
   onProceed,
   onAcceptLoss,
   onOverride,
+  onCloseTab,
 }: {
   product: Product
   cart: Cart | null
@@ -27,6 +44,7 @@ export function JudgeRoom({
   onProceed: () => void
   onAcceptLoss: () => void
   onOverride: () => void
+  onCloseTab: () => void
 }) {
   // phase: 'deliberating' | 'allRise' | 'strike' | 'revealed'
   //
@@ -41,6 +59,15 @@ export function JudgeRoom({
   const [phase, setPhase] = useState<'deliberating' | 'allRise' | 'strike' | 'revealed'>(
     verdict ? 'allRise' : 'deliberating',
   )
+
+  /**
+   * When non-null, the "Accept the ruling" countdown is running.
+   * When `remaining` hits 0 we call `onCloseTab` (which the trial
+   * app uses to record the outcome and ask the background to close
+   * the tab). The user can abort by clicking "Cancel", which sets
+   * this back to null and returns them to the normal verdict card.
+   */
+  const [closeCountdown, setCloseCountdown] = useState<{ remaining: number } | null>(null)
 
   useEffect(() => {
     if (!verdict) {
@@ -63,6 +90,35 @@ export function JudgeRoom({
       clearTimeout(t2)
     }
   }, [verdict])
+
+  /**
+   * Drive the "Accept the ruling" countdown. When remaining hits 0,
+   * fire `onCloseTab`. The interval is set up via setTimeout (not
+   * setInterval) so a re-render that bumps `remaining` doesn't pile
+   * up overlapping timers.
+   */
+  useEffect(() => {
+    if (!closeCountdown) return
+    if (closeCountdown.remaining <= 0) {
+      // Fire-and-forget. The trial app records the outcome and asks
+      // the background to close the tab.
+      try {
+        onCloseTab()
+      } catch (e) {
+        // If the close fails for any reason, drop out of the
+        // countdown so the user can still see the verdict.
+        setCloseCountdown(null)
+      }
+      return
+    }
+    const t = setTimeout(() => {
+      setCloseCountdown({ remaining: closeCountdown.remaining - 1 })
+    }, 1000)
+    return () => clearTimeout(t)
+    // We intentionally do not depend on `onCloseTab` to avoid
+    // re-creating the timer on every parent re-render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [closeCountdown])
 
   const isProceed = verdict?.decision === 'proceed'
   const confidencePct = verdict ? Math.round(verdict.confidence * 100) : 0
@@ -201,9 +257,49 @@ export function JudgeRoom({
               <button className="whybuy-btn" onClick={onProceed}>
                 {isCart ? 'Continue to checkout' : 'Continue to purchase'}
               </button>
+            ) : closeCountdown ? (
+              <div
+                role="alert"
+                aria-live="polite"
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: 10,
+                }}
+              >
+                <div
+                  style={{
+                    fontFamily: "'Cormorant Garamond', serif",
+                    fontSize: 22,
+                    color: '#f7eed7',
+                  }}
+                >
+                  Closing in <span style={{ color: '#e6c578', fontWeight: 700 }}>{closeCountdown.remaining}</span>…
+                </div>
+                <div
+                  style={{
+                    fontSize: 12,
+                    color: '#c9a14a',
+                    letterSpacing: '0.1em',
+                  }}
+                >
+                  Tab will close and a cooldown will be set on this product.
+                </div>
+                <button
+                  className="whybuy-btn-ghost whybuy-btn"
+                  onClick={() => setCloseCountdown(null)}
+                  style={{ background: 'transparent', color: '#e6c578' }}
+                >
+                  Cancel — keep me on the verdict
+                </button>
+              </div>
             ) : (
               <>
-                <button className="whybuy-btn" onClick={onAcceptLoss}>
+                <button
+                  className="whybuy-btn"
+                  onClick={() => setCloseCountdown({ remaining: CLOSE_COUNTDOWN_SECONDS })}
+                >
                   Accept the ruling
                 </button>
                 <button

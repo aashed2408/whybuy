@@ -1876,3 +1876,133 @@ test('TtsPlayback: interrupt() mid-stream stops the current source and clears th
     else delete globalThis.fetch
   }
 })
+
+// === Bypass storage (per-site session-scoped trial skip) ===
+//
+// When the user clicks "I disagree — proceed anyway" on a restraint
+// verdict, the current site is added to a session-scoped bypass set.
+// Every subsequent checkout click on that site passes through to
+// /checkout without re-triggering the trial. The set lives in
+// chrome.storage.session (cleared on browser restart).
+
+import { loadBypass, setBypass, isBypassedSync, refreshBypass, clearBypass } from '../lib/storage/bypass.ts'
+
+test('Bypass: empty by default, sync check returns false until loaded', async () => {
+  // Mock chrome.storage.session as a simple in-memory map.
+  const store = {}
+  const savedStorage = globalThis.chrome?.storage?.session
+  if (!globalThis.chrome) globalThis.chrome = {}
+  globalThis.chrome.storage = globalThis.chrome.storage || {}
+  globalThis.chrome.storage.session = {
+    async get(key) { return { [key]: store[key] } },
+    async set(obj) { Object.assign(store, obj) },
+  }
+  // Reload the module so its internal cache resets to "not loaded".
+  // (The cache is module-level; we work around it by re-importing.)
+  try {
+    // First call: cache is empty, isBypassedSync returns false.
+    assert.equal(isBypassedSync('amazon.ca'), false, 'unknown site is not bypassed')
+    // After setBypass + refresh, the sync check returns true.
+    await setBypass('amazon.ca')
+    await refreshBypass()
+    assert.equal(isBypassedSync('amazon.ca'), true, 'amazon.ca should be bypassed after setBypass')
+    // Other sites are not affected.
+    assert.equal(isBypassedSync('ebay.com'), false, 'ebay.com should not be bypassed')
+    // Idempotent: setting twice doesn't duplicate.
+    await setBypass('amazon.ca')
+    await refreshBypass()
+    const cur = await loadBypass()
+    assert.deepEqual(cur.sites, ['amazon.ca'])
+  } finally {
+    if (savedStorage) globalThis.chrome.storage.session = savedStorage
+    else delete globalThis.chrome.storage.session
+  }
+})
+
+test('Bypass: setBypass preserves existing sites', async () => {
+  const store = {}
+  const savedStorage = globalThis.chrome?.storage?.session
+  if (!globalThis.chrome) globalThis.chrome = {}
+  globalThis.chrome.storage = globalThis.chrome.storage || {}
+  globalThis.chrome.storage.session = {
+    async get(key) { return { [key]: store[key] } },
+    async set(obj) { Object.assign(store, obj) },
+  }
+  try {
+    await setBypass('amazon.ca')
+    await setBypass('ebay.com')
+    await refreshBypass()
+    const cur = await loadBypass()
+    assert.deepEqual(cur.sites.sort(), ['amazon.ca', 'ebay.com'])
+    // clearBypass removes one site, leaves the other.
+    await clearBypass('amazon.ca')
+    const after = await loadBypass()
+    assert.deepEqual(after.sites, ['ebay.com'])
+  } finally {
+    if (savedStorage) globalThis.chrome.storage.session = savedStorage
+    else delete globalThis.chrome.storage.session
+  }
+})
+
+// === Judge prompt: moderate win rate (no default to restraint) ===
+//
+// Bug: the previous judge prompt said "Empty defenses lose to
+// non-empty prosecutions by default" and "If neither side is
+// compelling, default to 'I rule in favor of restraint.' A cautious
+// ruling is better than a false positive." This made "I want it"
+// alone always lose. The user wanted a moderate win rate (~50%) when
+// the defense is bare "I want it", so the prompt now:
+//   - Tells the judge the user is an adult with autonomy
+//   - Removes the "default to restraint" rule
+//   - Adds "If both sides are equally weak, lean in favor of the
+//     purchase. The user gets the benefit of the doubt, not the
+//     prosecution."
+//   - Adds "If the prosecution's case is generic and the defense is
+//     'I want it' alone, rule in favor of the purchase"
+
+test('judge prompt: no longer defaults to restraint when both sides are weak', () => {
+  const p = judgeSystemPrompt(product, null, { judgeMode: 'natural' })
+  assert.doesNotMatch(p, /If neither side is compelling, default to "I rule in favor of restraint"/i)
+  assert.doesNotMatch(p, /A cautious ruling is better than a false positive/i)
+  assert.doesNotMatch(p, /Empty defenses lose to non-empty prosecutions by default/i)
+})
+
+test('judge prompt: explicitly leans in favor of the purchase when arguments are equally weak', () => {
+  const p = judgeSystemPrompt(product, null, { judgeMode: 'natural' })
+  assert.match(p, /equally weak.*purchase|benefit of the doubt/i)
+  assert.match(p, /generic.*purchase|generic skepticism.*autonomy/i)
+})
+
+test('judge prompt: tells the model the user is an adult with autonomy', () => {
+  const p = judgeSystemPrompt(product, null, { judgeMode: 'natural' })
+  assert.match(p, /adult.*autonomy|autonomy over their own spending/i)
+  assert.match(p, /burden of persuasion is on the prosecution|burden.*prosecution/i)
+})
+
+// === Prosecution prompt: no deferral ("I will demonstrate" without content) ===
+//
+// Bug: the prosecution was generating sentences like "the prosecution
+// will demonstrate that…" or "next, I will argue…" without ever
+// delivering the actual argument. The user heard "I will now show
+// that this product is overpriced" and then the turn ended. The
+// prompt now has a NO DEFERRAL section that forbids preambles and
+// requires the actual argument in every sentence.
+
+test('prosecution prompt: forbids "I will demonstrate" / "next, I will" / "in my next point" without content', () => {
+  const p = prosecutionSystemPrompt(product, null)
+  assert.match(p, /NO DEFERRAL|never promise an argument without immediately delivering|do not write sentences like/i)
+  assert.match(p, /I will demonstrate|next, I will show|will now argue/i)
+  // The prompt must tell the model to delete the preamble and state the argument directly.
+  assert.match(p, /DELETE the preamble|state the actual argument directly/i)
+  // Must forbid summary-of-points-to-come phrasings.
+  assert.match(p, /list of points you|have shown|will show|have not yet shown/i)
+  // The opening statement template's "demonstrate that…" must be followed by an actual claim.
+  assert.match(p, /MUST be followed by the actual demonstrative claim/i)
+})
+
+test('prosecution prompt: tells the model to ground arguments in real-world knowledge of the product category', () => {
+  const p = prosecutionSystemPrompt(product, null)
+  assert.match(p, /real-world knowledge|typical pricing|common alternatives|known issues|expected lifespan/i)
+  // Must prefer specific numbers over generic phrasing.
+  assert.match(p, /specific numbers|cite specific numbers/i)
+})
