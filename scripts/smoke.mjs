@@ -8,6 +8,7 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
 import puppeteer from 'puppeteer-core'
+import { resolveChrome } from './chrome.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const projectRoot = join(__dirname, '..')
@@ -19,7 +20,7 @@ if (!existsSync(extensionPath)) {
 }
 
 const userDataDir = mkdtempSync(join(tmpdir(), 'whybuy-test-'))
-const puppeteerChrome = 'C:\\Users\\doomj\\.cache\\puppeteer\\chrome\\win64-149.0.7827.22\\chrome-win64\\chrome.exe'
+const puppeteerChrome = resolveChrome()
 const fileUrl = 'file:///' + join(__dirname, 'test-page.html').replace(/\\/g, '/')
 
 console.log('Launching Chrome with extension from', extensionPath)
@@ -30,6 +31,9 @@ let exitCode = 0
 
 try {
   browser = await puppeteer.launch({
+    // Branded Chrome 137+ ignores --load-extension; install over CDP instead.
+    pipe: true,
+    enableExtensions: [extensionPath],
     executablePath: puppeteerChrome,
     headless: 'new',
     args: [
@@ -37,8 +41,6 @@ try {
       '--disable-gpu',
       '--no-first-run',
       '--no-default-browser-check',
-      `--disable-extensions-except=${extensionPath}`,
-      `--load-extension=${extensionPath}`,
     ],
     dumpio: false,
     timeout: 30000,
@@ -52,9 +54,13 @@ try {
   // Wait for the extension's service worker to register.
   await new Promise((r) => setTimeout(r, 1500))
 
-  const swTarget = browser.targets().find(
-    (t) => t.type() === 'service_worker' && t.url().includes('chrome-extension://'),
-  )
+  // The extension is installed asynchronously; wait for its worker.
+  const swTarget = await browser
+    .waitForTarget(
+      (t) => t.type() === 'service_worker' && t.url().includes('chrome-extension://'),
+      { timeout: 15000 },
+    )
+    .catch(() => null)
   if (!swTarget) throw new Error('Service worker not found')
   const sw = await swTarget.worker()
   console.log('Service worker:', swTarget.url())
@@ -73,7 +79,7 @@ try {
   await page.goto(fileUrl, { waitUntil: 'load' })
   await new Promise((r) => setTimeout(r, 1500))
 
-  await page.click('#buy')
+  await page.click('#checkout')
   await new Promise((r) => setTimeout(r, 2000))
 
   // Verify trial mounted.
@@ -120,7 +126,7 @@ try {
 
   const hasVerdict = await page.evaluate(() => {
     const el = document.querySelector('[data-whybuy="1"]')
-    return !!el?.shadowRoot?.querySelector('.whybuy-verdict-card')
+    return !!el?.shadowRoot?.querySelector('.whybuy-judge-reveal')
   })
   if (!hasVerdict) throw new Error('Verdict did not render')
   console.log('✔ Verdict rendered')

@@ -22,13 +22,14 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { tmpdir, hostname } from 'node:os'
 import puppeteer from 'puppeteer-core'
+import { resolveChrome } from './chrome.mjs'
 import { assertIsolatedProfile, logIsolatedProfile } from './lib/test-isolation.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const projectRoot = join(__dirname, '..')
 const extensionPath = join(projectRoot, '.output', 'chrome-mv3')
 const testPageUrl = 'file:///' + join(__dirname, 'test-page.html').replace(/\\/g, '/')
-const puppeteerChrome = 'C:\\Users\\doomj\\.cache\\puppeteer\\chrome\\win64-149.0.7827.22\\chrome-win64\\chrome.exe'
+const puppeteerChrome = resolveChrome()
 
 if (!existsSync(extensionPath)) {
   console.error('Extension not built. Run `npm run build` first.')
@@ -53,6 +54,9 @@ let exitCode = 0
 
 try {
   browser = await puppeteer.launch({
+    // Branded Chrome 137+ ignores --load-extension; install over CDP instead.
+    pipe: true,
+    enableExtensions: [extensionPath],
     executablePath: puppeteerChrome,
     headless: 'new',
     args: [
@@ -60,8 +64,6 @@ try {
       '--disable-gpu',
       '--no-first-run',
       '--no-default-browser-check',
-      `--disable-extensions-except=${extensionPath}`,
-      `--load-extension=${extensionPath}`,
     ],
     dumpio: false,
     timeout: 30000,
@@ -69,9 +71,13 @@ try {
 
   await new Promise((r) => setTimeout(r, 1500))
 
-  const swTarget = browser.targets().find(
-    (t) => t.type() === 'service_worker' && t.url().includes('chrome-extension://'),
-  )
+  // The extension is installed asynchronously; wait for its worker.
+  const swTarget = await browser
+    .waitForTarget(
+      (t) => t.type() === 'service_worker' && t.url().includes('chrome-extension://'),
+      { timeout: 15000 },
+    )
+    .catch(() => null)
   if (!swTarget) throw new Error('Service worker not found')
   const sw = await swTarget.worker()
   sw.on('console', (msg) => console.log('  [sw]', msg.text()))

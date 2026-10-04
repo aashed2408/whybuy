@@ -26,12 +26,13 @@ import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
 import { createServer } from 'node:http'
 import puppeteer from 'puppeteer-core'
+import { resolveChrome } from './chrome.mjs'
 import { isTempProfile, assertIsolatedProfile, logIsolatedProfile } from './lib/test-isolation.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const projectRoot = join(__dirname, '..')
 const extensionPath = join(projectRoot, '.output', 'chrome-mv3')
-const puppeteerChrome = 'C:\\Users\\doomj\\.cache\\puppeteer\\chrome\\win64-149.0.7827.22\\chrome-win64\\chrome.exe'
+const puppeteerChrome = resolveChrome()
 
 if (!existsSync(extensionPath)) {
   console.error('Extension not built. Run `npm run build` first.')
@@ -80,6 +81,9 @@ try {
 
   // === 2. Launch Chrome with the extension ===
   browser = await puppeteer.launch({
+    // Branded Chrome 137+ ignores --load-extension; install over CDP instead.
+    pipe: true,
+    enableExtensions: [extensionPath],
     executablePath: puppeteerChrome,
     headless: 'new',
     args: [
@@ -89,8 +93,6 @@ try {
       '--no-default-browser-check',
       '--lang=en-US',
       '--window-size=1280,900',
-      `--disable-extensions-except=${extensionPath}`,
-      `--load-extension=${extensionPath}`,
       `--user-data-dir=${profileDir}`,
     ],
     dumpio: false,
